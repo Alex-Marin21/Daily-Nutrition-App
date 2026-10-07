@@ -51,18 +51,20 @@ Open http://localhost:3000.
 
 ## Put it online for your father (HTTPS)
 
-Free setup: **Render** (free web service) + **Neon** (free Postgres database). No card needed.
+Free setup: **Vercel** (free hosting) + **Neon** (free Postgres database). No card needed.
 
 1. **Neon** (neon.tech): sign up → create a project → copy the **connection string** (`postgresql://...`).
-2. **Render** (render.com): sign in with GitHub → **New + → Blueprint** → pick this repository. It reads `render.yaml`.
-3. Fill in the three values Render asks for: `DATABASE_URL` (the Neon string), `ANTHROPIC_API_KEY`, `ENROLL_CODE`.
-4. Wait for **Live**, then open the `https://….onrender.com` address on his phone, type the access code once, then:
+2. **Vercel** (vercel.com): sign in with GitHub → **Add New… → Project** → import this repository. Leave the build settings as they are (`vercel.json` configures them).
+3. Before clicking Deploy, open **Environment Variables** and add `DATABASE_URL` (the Neon string), `ANTHROPIC_API_KEY`, `ENROLL_CODE`, and `MOCK_AI` = `0`.
+4. Click **Deploy**, then open the `https://….vercel.app` address on his phone, type the access code once, then:
    - **iPhone (Safari):** Share → *Add to Home Screen*
    - **Android (Chrome):** menu ⋮ → *Add to Home screen* / *Install app*
 
-The free server sleeps after ~15 minutes without visits, so the first open after a break takes 30–60 seconds (the app shows a "Starting up…" message). Meals are safe in the database.
+On Vercel, `api/index.js` runs the app as a serverless function and the `public/` folder is served directly.
 
-Storage: with `DATABASE_URL` set the app uses Postgres; without it, a local SQLite file (`data/nutrition.db`). Any Docker host works too.
+Alternatives: `render.yaml` (Render free plan: sleeps after 15 min idle, so the first open takes 30–60 s) or the `Dockerfile` (any Docker host).
+
+Storage: with `DATABASE_URL` set the app uses Postgres; without it, a local SQLite file (`data/nutrition.db`).
 
 ## Managing phones
 
