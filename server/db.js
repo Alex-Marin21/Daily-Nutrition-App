@@ -129,8 +129,12 @@ async function openPostgres(url) {
   const { default: pg } = await import('pg');
   // BIGINT (epoch ms, ids, COUNT) arrives as a string by default; all our values fit in a JS number.
   pg.types.setTypeParser(20, (v) => Number(v));
+  // Hosted Postgres strings (Supabase, Neon) carry ?sslmode=require, which newer
+  // pg versions treat as full certificate verification against Node's CA list;
+  // Supabase's pooler uses its own CA, so that fails. Drop it and set SSL below.
+  const cleanUrl = url.replace(/([?&])sslmode=[^&]*&?/i, '$1').replace(/[?&]$/, '');
   const pool = new pg.Pool({
-    connectionString: url,
+    connectionString: cleanUrl,
     max: Number(process.env.PG_POOL_MAX || 5),
     idleTimeoutMillis: 30_000,
     ssl: /localhost|127\.0\.0\.1/.test(url) ? false : { rejectUnauthorized: false },
