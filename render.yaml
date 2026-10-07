@@ -1,0 +1,23 @@
+# One-click deploy on Render (render.com): New + > Blueprint > pick this repository.
+# A persistent disk keeps meals across restarts; disks need a paid instance (Starter).
+services:
+  - type: web
+    name: daily-calories
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false        # you paste it in the Render dashboard
+      - key: ENROLL_CODE
+        sync: false        # the access code your father types once
+      - key: MOCK_AI
+        value: "0"
+      - key: MAX_DEVICES
+        value: "2"
+      - key: DAILY_ANALYSIS_LIMIT
+        value: "40"

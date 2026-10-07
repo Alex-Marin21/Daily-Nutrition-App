@@ -1,0 +1,12 @@
+FROM node:24-slim
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY server ./server
+COPY public ./public
+COPY scripts ./scripts
+ENV NODE_ENV=production PORT=3000 DB_PATH=/app/data/nutrition.db
+# Mount a persistent volume here so meals survive restarts/redeploys.
+VOLUME ["/app/data"]
+EXPOSE 3000
+CMD ["node", "--disable-warning=ExperimentalWarning", "server/index.js"]

@@ -1,0 +1,19 @@
+{
+  "name": "daily-nutrition",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Snap a photo of a meal, get calories and macros, and track your day.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --watch server/index.js",
+    "icons": "node scripts/make-icons.js",
+    "devices": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/devices.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.0"
+  }
+}

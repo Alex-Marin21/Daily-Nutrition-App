@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "app", "runtimeExecutable": "C:/Program Files/nodejs/node.exe", "runtimeArgs": ["--env-file-if-exists=.env", "--disable-warning=ExperimentalWarning", "server/index.js"], "port": 3000 }
+  ]
+}
