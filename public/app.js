@@ -31,6 +31,7 @@ const STR = {
     installHint: 'Tip: add this app to your Home Screen for one-tap access. iPhone: Share → “Add to Home Screen”. Android: menu ⋮ → “Add to Home screen”.',
     enrollTitle: 'Daily Calories', enrollText: 'Enter the access code to start.', code: 'Access code', start: 'Start',
     offlineSaved: 'No connection. Saved on the phone — it will sync automatically.',
+    waking: 'Starting up… the first open of the day can take up to a minute.',
     close: 'Close', prevDay: 'Previous day', nextDay: 'Next day', retry: 'Try again', loadFailed: 'Could not load. Check the connection.',
     err_network: 'No internet connection. Try again.',
     err_daily_limit: 'Daily photo limit reached. You can still type what you ate.',
@@ -62,6 +63,7 @@ const STR = {
     installHint: 'Sfat: adaugă aplicația pe ecranul principal. iPhone: Partajare → „Adaugă pe ecranul principal”. Android: meniul ⋮ → „Adaugă pe ecranul de pornire”.',
     enrollTitle: 'Calorii zilnice', enrollText: 'Introdu codul de acces ca să începi.', code: 'Cod de acces', start: 'Începe',
     offlineSaved: 'Fără conexiune. Salvat pe telefon — se sincronizează automat.',
+    waking: 'Se pornește… prima deschidere poate dura până la un minut.',
     close: 'Închide', prevDay: 'Ziua anterioară', nextDay: 'Ziua următoare', retry: 'Încearcă din nou', loadFailed: 'Nu s-a putut încărca. Verifică internetul.',
     err_network: 'Nu există internet. Încearcă din nou.',
     err_daily_limit: 'Ai atins limita de poze pe azi. Poți scrie ce ai mâncat.',
@@ -220,6 +222,11 @@ function renderEnroll() {
 
 async function loadDay() {
   state.loadError = false;
+  // The free server sleeps when unused; tell the user why the first load is slow.
+  const slowTimer = setTimeout(() => {
+    const el = $('#waking');
+    if (el) el.hidden = false;
+  }, 4000);
   try {
     const [day, me] = await Promise.all([api('GET', `/days/${state.date}`), state.me ? state.me : api('GET', '/me')]);
     state.day = day;
@@ -228,6 +235,7 @@ async function loadDay() {
     if (e.code === 'unauthorized') return;
     state.loadError = true;
   }
+  clearTimeout(slowTimer);
   renderDay();
 }
 
@@ -263,7 +271,8 @@ function renderDay() {
   if (state.loadError) {
     list = `<div class="empty"><p>${t('loadFailed')}</p><button class="btn btn-secondary" data-act="reload">${t('retry')}</button></div>`;
   } else if (!state.day) {
-    list = '<div class="skeleton"></div><div class="skeleton"></div>';
+    list = `<p class="hint" id="waking" hidden style="text-align:center">${t('waking')}</p>
+      <div class="skeleton"></div><div class="skeleton"></div>`;
   } else if (!meals.length) {
     list = `<div class="empty"><div class="big">🍽️</div><b>${t('noMeals')}</b><p class="hint">${t('noMealsHint')}</p></div>`;
   } else {

@@ -1,22 +1,23 @@
-# One-click deploy on Render (render.com): New + > Blueprint > pick this repository.
-# A persistent disk keeps meals across restarts; disks need a paid instance (Starter).
+# Free deploy on Render (render.com): New + > Blueprint > pick this repository.
+# Meals are stored in a free Postgres database (e.g. Neon), so no paid disk is needed.
+# Free instances sleep after ~15 min without visits; the first open then takes 30-60 s.
 services:
   - type: web
     name: daily-calories
     runtime: docker
-    plan: starter
+    plan: free
     healthCheckPath: /healthz
-    disk:
-      name: data
-      mountPath: /app/data
-      sizeGB: 1
     envVars:
+      - key: DATABASE_URL
+        sync: false        # paste the Neon connection string
       - key: ANTHROPIC_API_KEY
-        sync: false        # you paste it in the Render dashboard
+        sync: false        # paste your Claude API key
       - key: ENROLL_CODE
         sync: false        # the access code your father types once
       - key: MOCK_AI
         value: "0"
+      - key: TRUST_PROXY
+        value: "1"
       - key: MAX_DEVICES
         value: "2"
       - key: DAILY_ANALYSIS_LIMIT

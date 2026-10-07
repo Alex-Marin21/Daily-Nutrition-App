@@ -13,42 +13,37 @@ function safeEqual(a, b) {
 }
 
 export function createAuth(db, { enrollCode, maxDevices }) {
-  const findDevice = db.prepare(
-    'SELECT id, user_id FROM devices WHERE token_hash = ? AND revoked_at IS NULL'
-  );
-  const touchDevice = db.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?');
-  const countDevices = db.prepare('SELECT COUNT(*) AS n FROM devices WHERE revoked_at IS NULL');
-  const firstUser = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1');
-  const insertUser = db.prepare('INSERT INTO users (display_name, created_at) VALUES (?, ?)');
-  const insertDevice = db.prepare(
-    'INSERT INTO devices (user_id, name, token_hash, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)'
-  );
-
-  function enroll(code, deviceName) {
+  async function enroll(code, deviceName) {
     if (!enrollCode || enrollCode.length < 8) {
       return { error: 'server_not_configured', status: 503 };
     }
     if (!safeEqual(code || '', enrollCode)) return { error: 'invalid_code', status: 401 };
-    if (countDevices.get().n >= maxDevices) return { error: 'device_limit', status: 403 };
+    const { n } = await db.get('SELECT COUNT(*) AS n FROM devices WHERE revoked_at IS NULL');
+    if (n >= maxDevices) return { error: 'device_limit', status: 403 };
 
     const now = Date.now();
-    let user = firstUser.get();
+    let user = await db.get('SELECT id FROM users ORDER BY id LIMIT 1');
     if (!user) {
-      const r = insertUser.run('Beta tester', now);
-      user = { id: Number(r.lastInsertRowid) };
+      user = await db.get('INSERT INTO users (display_name, created_at) VALUES (?, ?) RETURNING id', ['Beta tester', now]);
     }
     const token = crypto.randomBytes(32).toString('base64url');
-    insertDevice.run(user.id, String(deviceName || 'phone').slice(0, 80), sha256(token), now, now);
+    await db.run(
+      'INSERT INTO devices (user_id, name, token_hash, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)',
+      [user.id, String(deviceName || 'phone').slice(0, 80), sha256(token), now, now]
+    );
     return { token, userId: user.id };
   }
 
-  function authenticate(req) {
+  async function authenticate(req) {
     const header = req.headers.authorization || '';
     const m = header.match(/^Bearer\s+([A-Za-z0-9_-]{20,})$/);
     if (!m) return null;
-    const device = findDevice.get(sha256(m[1]));
+    const device = await db.get(
+      'SELECT id, user_id FROM devices WHERE token_hash = ? AND revoked_at IS NULL',
+      [sha256(m[1])]
+    );
     if (!device) return null;
-    touchDevice.run(Date.now(), device.id);
+    db.run('UPDATE devices SET last_seen_at = ? WHERE id = ?', [Date.now(), device.id]).catch(() => {});
     return { id: device.user_id, deviceId: device.id };
   }
 

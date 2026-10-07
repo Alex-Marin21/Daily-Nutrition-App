@@ -51,15 +51,18 @@ Open http://localhost:3000.
 
 ## Put it online for your father (HTTPS)
 
-He needs a stable HTTPS address. Any host that runs Docker and has a persistent disk works:
+Free setup: **Render** (free web service) + **Neon** (free Postgres database). No card needed.
 
-1. Push this folder to a private Git repository.
-2. Create a web service from the `Dockerfile` (e.g. Render, Railway, Fly.io, or any VPS).
-3. Attach a persistent disk/volume at `/app/data`. Without one, meals are lost on every redeploy.
-4. Set the environment variables from the table above in the host's dashboard. Use `MOCK_AI=0`, and never commit `.env`.
-5. Open the HTTPS address on his phone, type the access code once, then:
+1. **Neon** (neon.tech): sign up → create a project → copy the **connection string** (`postgresql://...`).
+2. **Render** (render.com): sign in with GitHub → **New + → Blueprint** → pick this repository. It reads `render.yaml`.
+3. Fill in the three values Render asks for: `DATABASE_URL` (the Neon string), `ANTHROPIC_API_KEY`, `ENROLL_CODE`.
+4. Wait for **Live**, then open the `https://….onrender.com` address on his phone, type the access code once, then:
    - **iPhone (Safari):** Share → *Add to Home Screen*
    - **Android (Chrome):** menu ⋮ → *Add to Home screen* / *Install app*
+
+The free server sleeps after ~15 minutes without visits, so the first open after a break takes 30–60 seconds (the app shows a "Starting up…" message). Meals are safe in the database.
+
+Storage: with `DATABASE_URL` set the app uses Postgres; without it, a local SQLite file (`data/nutrition.db`). Any Docker host works too.
 
 ## Managing phones
 
@@ -68,7 +71,7 @@ npm run devices              # list registered phones
 npm run devices -- revoke 2  # remove phone #2 (frees a slot)
 ```
 
-If he changes phones or clears the browser, revoke the old one and he enters the code again.
+If he changes phones or clears the browser, revoke the old one and he enters the code again. To manage the online database from this PC, put the Neon `DATABASE_URL` in your local `.env` first.
 
 ## Cost
 
@@ -76,7 +79,7 @@ Each photo is one Claude request (`claude-opus-5-5`, about 2–3k tokens in plus
 
 ## Checking AI accuracy
 
-All data is in `data/nutrition.db` (SQLite). For example, the share of foods logged without changes:
+Online, the data is in Neon; you can run these in Neon's **SQL Editor**. For example, the share of foods logged without changes:
 
 ```sql
 SELECT source, COUNT(*) FROM meal_items GROUP BY source;   -- ai / ai_edited / manual

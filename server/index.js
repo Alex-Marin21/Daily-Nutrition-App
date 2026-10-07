@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { openDb, tx } from './db.js';
+import { openDb } from './db.js';
 import { createAuth, createLimiter } from './auth.js';
 import { analyzePhoto, analyzeText, AnalysisError, PROMPT_VERSION } from './analyze.js';
 
@@ -11,12 +11,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, '..', 'public');
 const PORT = Number(process.env.PORT || 3000);
 const DAILY_LIMIT = Number(process.env.DAILY_ANALYSIS_LIMIT || 40);
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 
 if (process.env.MOCK_AI !== '1' && !process.env.ANTHROPIC_API_KEY) {
   console.warn('WARNING: ANTHROPIC_API_KEY is not set. Photo analysis will fail (set MOCK_AI=1 to test the UI).');
 }
 
-const db = openDb(process.env.DB_PATH || 'data/nutrition.db');
+const db = await openDb();
+console.log(`Storage: ${db.kind}`);
 const auth = createAuth(db, {
   enrollCode: process.env.ENROLL_CODE,
   maxDevices: Number(process.env.MAX_DEVICES || 2),
@@ -68,7 +70,15 @@ function readJson(req, limitBytes) {
   });
 }
 
-const clientIp = (req) => req.socket.remoteAddress || 'unknown';
+// Behind a hosting proxy (Render), the real client IP is the first X-Forwarded-For entry.
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (fwd) return fwd;
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack'];
 const round1 = (n) => Math.round(n * 10) / 10;
@@ -82,38 +92,8 @@ function finite(v, min, max, field) {
 
 // ---------- domain: meals ----------
 
-const q = {
-  analysesLast24h: db.prepare(
-    "SELECT COUNT(*) AS n FROM analyses WHERE user_id = ? AND created_at > ? AND status = 'complete'"
-  ),
-  insertAnalysis: db.prepare(`INSERT INTO analyses
-    (id, user_id, kind, status, model, prompt_version, input_text, result_json, error, latency_ms, input_tokens, output_tokens, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-  getAnalysis: db.prepare('SELECT id FROM analyses WHERE id = ? AND user_id = ?'),
-  getUser: db.prepare('SELECT id, display_name, goal_kcal FROM users WHERE id = ?'),
-  setGoal: db.prepare('UPDATE users SET goal_kcal = ? WHERE id = ?'),
-  mealByKey: db.prepare('SELECT id FROM meals WHERE user_id = ? AND idempotency_key = ?'),
-  mealById: db.prepare('SELECT * FROM meals WHERE id = ? AND user_id = ?'),
-  insertMeal: db.prepare(`INSERT INTO meals
-    (id, user_id, analysis_id, meal_type, eaten_at, local_date, tz_offset_min, thumbnail, idempotency_key,
-     kcal, protein, carbs, fat, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-  updateMeal: db.prepare(`UPDATE meals SET meal_type = ?, kcal = ?, protein = ?, carbs = ?, fat = ?, updated_at = ?
-    WHERE id = ? AND user_id = ?`),
-  deleteItems: db.prepare('DELETE FROM meal_items WHERE meal_id = ? AND user_id = ?'),
-  insertItem: db.prepare(`INSERT INTO meal_items
-    (meal_id, user_id, position, name, portion, grams, kcal_100g, protein_100g, carbs_100g, fat_100g,
-     kcal, protein, carbs, fat, source, ai_name, ai_grams)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-  deleteMeal: db.prepare('DELETE FROM meals WHERE id = ? AND user_id = ?'),
-  mealsForDate: db.prepare(`SELECT id, analysis_id, meal_type, eaten_at, local_date, thumbnail, kcal, protein, carbs, fat
-    FROM meals WHERE user_id = ? AND local_date = ? ORDER BY eaten_at`),
-  itemsForMeal: db.prepare(`SELECT name, portion, grams, kcal_100g, protein_100g, carbs_100g, fat_100g,
-    kcal, protein, carbs, fat, source, ai_name, ai_grams FROM meal_items WHERE meal_id = ? ORDER BY position`),
-  summary: db.prepare(`SELECT local_date AS date, COUNT(*) AS meals, SUM(kcal) AS kcal, SUM(protein) AS protein,
-    SUM(carbs) AS carbs, SUM(fat) AS fat FROM meals WHERE user_id = ? AND local_date BETWEEN ? AND ?
-    GROUP BY local_date ORDER BY local_date`),
-};
+const ITEM_COLS = `name, portion, grams, kcal_100g, protein_100g, carbs_100g, fat_100g,
+  kcal, protein, carbs, fat, source, ai_name, ai_grams`;
 
 // Nutrients are always computed on the server from grams x per-100 g density.
 function buildItems(rawItems) {
@@ -157,17 +137,23 @@ function totals(items) {
   return { kcal: round1(t.kcal), protein: round1(t.protein), carbs: round1(t.carbs), fat: round1(t.fat) };
 }
 
-function writeItems(mealId, userId, items) {
-  items.forEach((i, idx) =>
-    q.insertItem.run(mealId, userId, idx, i.name, i.portion, i.grams, i.kcal_100g, i.protein_100g, i.carbs_100g,
-      i.fat_100g, i.kcal, i.protein, i.carbs, i.fat, i.source, i.ai_name, i.ai_grams)
-  );
+async function writeItems(q, mealId, userId, items) {
+  for (const [idx, i] of items.entries()) {
+    await q.run(
+      `INSERT INTO meal_items (meal_id, user_id, position, ${ITEM_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [mealId, userId, idx, i.name, i.portion, i.grams, i.kcal_100g, i.protein_100g, i.carbs_100g,
+        i.fat_100g, i.kcal, i.protein, i.carbs, i.fat, i.source, i.ai_name, i.ai_grams]
+    );
+  }
 }
 
-function loadMeal(id, userId) {
-  const m = q.mealById.get(id, userId);
+const itemsForMeal = (mealId) =>
+  db.all(`SELECT ${ITEM_COLS} FROM meal_items WHERE meal_id = ? ORDER BY position`, [mealId]);
+
+async function loadMeal(id, userId) {
+  const m = await db.get('SELECT * FROM meals WHERE id = ? AND user_id = ?', [id, userId]);
   if (!m) return null;
-  return { ...m, items: q.itemsForMeal.all(id) };
+  return { ...m, items: await itemsForMeal(id) };
 }
 
 // ---------- routes ----------
@@ -178,29 +164,32 @@ async function handleApi(req, res, url) {
   if (route === 'POST /api/v1/enroll') {
     if (!enrollLimiter(clientIp(req))) throw new HttpError(429, 'too_many_attempts');
     const body = await readJson(req, 4_000);
-    const r = auth.enroll(String(body.code || '').trim(), body.deviceName);
+    const r = await auth.enroll(String(body.code || '').trim(), body.deviceName);
     if (r.error) throw new HttpError(r.status, r.error);
     return send(res, 201, { token: r.token });
   }
 
-  const user = auth.authenticate(req);
+  const user = await auth.authenticate(req);
   if (!user) throw new HttpError(401, 'unauthorized');
   if (!burstLimiter(`u${user.id}`)) throw new HttpError(429, 'slow_down');
 
   if (route === 'GET /api/v1/me') {
-    const u = q.getUser.get(user.id);
+    const u = await db.get('SELECT id, display_name, goal_kcal FROM users WHERE id = ?', [user.id]);
     return send(res, 200, { goalKcal: u.goal_kcal, name: u.display_name, dailyAnalysisLimit: DAILY_LIMIT });
   }
 
   if (route === 'PATCH /api/v1/me') {
     const body = await readJson(req, 4_000);
-    q.setGoal.run(Math.round(finite(body.goalKcal, 800, 6000, 'goal')), user.id);
+    await db.run('UPDATE users SET goal_kcal = ? WHERE id = ?', [Math.round(finite(body.goalKcal, 800, 6000, 'goal')), user.id]);
     return send(res, 200, { ok: true });
   }
 
   if (route === 'POST /api/v1/analyses') {
     const body = await readJson(req, 8_000_000);
-    const used = q.analysesLast24h.get(user.id, Date.now() - 86_400_000).n;
+    const { n: used } = await db.get(
+      "SELECT COUNT(*) AS n FROM analyses WHERE user_id = ? AND created_at > ? AND status = 'complete'",
+      [user.id, Date.now() - 86_400_000]
+    );
     if (used >= DAILY_LIMIT) throw new HttpError(429, 'daily_limit');
 
     const kind = body.text ? 'text' : 'photo';
@@ -215,70 +204,98 @@ async function handleApi(req, res, url) {
 
     const id = crypto.randomUUID();
     const started = Date.now();
+    const record = (status, out, error) =>
+      db.run(
+        `INSERT INTO analyses (id, user_id, kind, status, model, prompt_version, input_text, result_json, error,
+          latency_ms, input_tokens, output_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, user.id, kind, status, out?.model ?? null, PROMPT_VERSION, input.text ?? null,
+          out ? JSON.stringify(out.result) : null, error, Date.now() - started,
+          out?.inputTokens ?? null, out?.outputTokens ?? null, started]
+      );
+    let out;
     try {
-      const out = kind === 'photo'
+      out = kind === 'photo'
         ? await analyzePhoto({ ...input, lang: lang(body.lang) })
         : await analyzeText({ ...input, lang: lang(body.lang) });
-      q.insertAnalysis.run(id, user.id, kind, 'complete', out.model, PROMPT_VERSION, input.text ?? null,
-        JSON.stringify(out.result), null, Date.now() - started, out.inputTokens, out.outputTokens, started);
-      return send(res, 200, { id, ...out.result });
     } catch (err) {
       const code = err instanceof AnalysisError ? err.code : 'ai_unavailable';
       console.error(`[analysis ${id}] ${code}:`, err.message);
-      q.insertAnalysis.run(id, user.id, kind, 'failed', null, PROMPT_VERSION, input.text ?? null, null,
-        String(err.message).slice(0, 500), Date.now() - started, null, null, started);
+      await record('failed', null, String(err.message).slice(0, 500));
       throw new HttpError(502, code);
     }
+    await record('complete', out, null);
+    return send(res, 200, { id, ...out.result });
   }
 
   if (route === 'POST /api/v1/meals') {
     const body = await readJson(req, 200_000);
     const key = body.idempotencyKey ? String(body.idempotencyKey).slice(0, 64) : null;
     if (key) {
-      const existing = q.mealByKey.get(user.id, key);
-      if (existing) return send(res, 200, loadMeal(existing.id, user.id));
+      const existing = await db.get('SELECT id FROM meals WHERE user_id = ? AND idempotency_key = ?', [user.id, key]);
+      if (existing) return send(res, 200, await loadMeal(existing.id, user.id));
     }
     const items = buildItems(body.items);
     const t = totals(items);
     const mealType = MEAL_TYPES.includes(body.mealType) ? body.mealType : 'snack';
     if (!DATE_RE.test(body.localDate || '')) throw new HttpError(400, 'invalid_date');
-    const eatenAt = finite(body.eatenAt ?? Date.now(), 0, Date.now() + 86_400_000, 'eaten_at');
-    const analysisId = body.analysisId && q.getAnalysis.get(String(body.analysisId), user.id) ? String(body.analysisId) : null;
+    const eatenAt = Math.round(finite(body.eatenAt ?? Date.now(), 0, Date.now() + 86_400_000, 'eaten_at'));
+    const analysisId = body.analysisId &&
+      (await db.get('SELECT id FROM analyses WHERE id = ? AND user_id = ?', [String(body.analysisId), user.id]))
+      ? String(body.analysisId) : null;
     const thumb = typeof body.thumbnail === 'string' && body.thumbnail.startsWith('data:image/jpeg;base64,')
       ? body.thumbnail.slice(0, 150_000) : null;
+    const tz = Number.isInteger(body.tzOffsetMin) ? body.tzOffsetMin : null;
     const id = crypto.randomUUID();
     const now = Date.now();
-    tx(db, () => {
-      q.insertMeal.run(id, user.id, analysisId, mealType, eatenAt, body.localDate,
-        Number.isFinite(body.tzOffsetMin) ? body.tzOffsetMin : null, thumb, key,
-        t.kcal, t.protein, t.carbs, t.fat, now, now);
-      writeItems(id, user.id, items);
+    await db.tx(async (q) => {
+      await q.run(
+        `INSERT INTO meals (id, user_id, analysis_id, meal_type, eaten_at, local_date, tz_offset_min, thumbnail,
+          idempotency_key, kcal, protein, carbs, fat, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, user.id, analysisId, mealType, eatenAt, body.localDate, tz, thumb, key,
+          t.kcal, t.protein, t.carbs, t.fat, now, now]
+      );
+      await writeItems(q, id, user.id, items);
     });
-    return send(res, 201, loadMeal(id, user.id));
+    return send(res, 201, await loadMeal(id, user.id));
   }
 
   const mealMatch = url.pathname.match(/^\/api\/v1\/meals\/([0-9a-f-]{36})$/);
   if (mealMatch && req.method === 'PUT') {
+    const mealId = mealMatch[1];
     const body = await readJson(req, 200_000);
-    if (!q.mealById.get(mealMatch[1], user.id)) throw new HttpError(404, 'not_found');
+    if (!(await db.get('SELECT id FROM meals WHERE id = ? AND user_id = ?', [mealId, user.id]))) {
+      throw new HttpError(404, 'not_found');
+    }
     const items = buildItems(body.items);
     const t = totals(items);
     const mealType = MEAL_TYPES.includes(body.mealType) ? body.mealType : 'snack';
-    tx(db, () => {
-      q.deleteItems.run(mealMatch[1], user.id);
-      writeItems(mealMatch[1], user.id, items);
-      q.updateMeal.run(mealType, t.kcal, t.protein, t.carbs, t.fat, Date.now(), mealMatch[1], user.id);
+    await db.tx(async (q) => {
+      await q.run('DELETE FROM meal_items WHERE meal_id = ? AND user_id = ?', [mealId, user.id]);
+      await writeItems(q, mealId, user.id, items);
+      await q.run(
+        'UPDATE meals SET meal_type = ?, kcal = ?, protein = ?, carbs = ?, fat = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+        [mealType, t.kcal, t.protein, t.carbs, t.fat, Date.now(), mealId, user.id]
+      );
     });
-    return send(res, 200, loadMeal(mealMatch[1], user.id));
+    return send(res, 200, await loadMeal(mealId, user.id));
   }
   if (mealMatch && req.method === 'DELETE') {
-    q.deleteMeal.run(mealMatch[1], user.id);
+    await db.tx(async (q) => {
+      await q.run('DELETE FROM meal_items WHERE meal_id = ? AND user_id = ?', [mealMatch[1], user.id]);
+      await q.run('DELETE FROM meals WHERE id = ? AND user_id = ?', [mealMatch[1], user.id]);
+    });
     return send(res, 204);
   }
 
   const dayMatch = url.pathname.match(/^\/api\/v1\/days\/(\d{4}-\d{2}-\d{2})$/);
   if (dayMatch && req.method === 'GET') {
-    const meals = q.mealsForDate.all(user.id, dayMatch[1]).map((m) => ({ ...m, items: q.itemsForMeal.all(m.id) }));
+    const meals = await db.all(
+      `SELECT id, analysis_id, meal_type, eaten_at, local_date, thumbnail, kcal, protein, carbs, fat
+        FROM meals WHERE user_id = ? AND local_date = ? ORDER BY eaten_at`,
+      [user.id, dayMatch[1]]
+    );
+    for (const m of meals) m.items = await itemsForMeal(m.id);
     return send(res, 200, { date: dayMatch[1], totals: totals(meals), meals });
   }
 
@@ -286,7 +303,13 @@ async function handleApi(req, res, url) {
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
     if (!DATE_RE.test(from || '') || !DATE_RE.test(to || '')) throw new HttpError(400, 'invalid_range');
-    return send(res, 200, { days: q.summary.all(user.id, from, to) });
+    const days = await db.all(
+      `SELECT local_date AS date, COUNT(*) AS meals, SUM(kcal) AS kcal, SUM(protein) AS protein,
+        SUM(carbs) AS carbs, SUM(fat) AS fat FROM meals WHERE user_id = ? AND local_date BETWEEN ? AND ?
+        GROUP BY local_date ORDER BY local_date`,
+      [user.id, from, to]
+    );
+    return send(res, 200, { days });
   }
 
   throw new HttpError(404, 'not_found');
