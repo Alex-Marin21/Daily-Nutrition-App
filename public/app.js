@@ -48,7 +48,7 @@ const STR = {
     settings: 'Settings', language: 'Language', goal: 'Daily calorie goal', save: 'Save', goalSaved: 'Goal saved ✓',
     disconnect: 'Sign out', disconnectConfirm: 'Sign out of the app on this phone?',
     signInText: 'Sign in to start. Your meals are saved to your account.', google: 'Continue with Google',
-    orCode: 'I have an access code',
+    orCode: 'I have an access code', privacy: 'Privacy policy',
     err_invalid_login: 'Sign-in failed. Please try again.', err_auth_unavailable: 'The sign-in service is not responding. Try again in a moment.',
     err_login_cancelled: 'Sign-in was cancelled.',
     installHint: 'Tip: add this app to your Home Screen for one-tap access. iPhone: Share → “Add to Home Screen”. Android: menu ⋮ → “Add to Home screen”.',
@@ -102,7 +102,7 @@ const STR = {
     settings: 'Setări', language: 'Limba', goal: 'Ținta zilnică de calorii', save: 'Salvează', goalSaved: 'Țintă salvată ✓',
     disconnect: 'Ieși din cont', disconnectConfirm: 'Ieși din aplicație pe acest telefon?',
     signInText: 'Conectează-te ca să începi. Mesele tale se salvează în contul tău.', google: 'Continuă cu Google',
-    orCode: 'Am un cod de acces',
+    orCode: 'Am un cod de acces', privacy: 'Politica de confidențialitate',
     err_invalid_login: 'Conectarea nu a reușit. Încearcă din nou.', err_auth_unavailable: 'Serviciul de conectare nu răspunde. Încearcă puțin mai târziu.',
     err_login_cancelled: 'Conectarea a fost anulată.',
     installHint: 'Sfat: adaugă aplicația pe ecranul principal. iPhone: Partajare → „Adaugă pe ecranul principal”. Android: meniul ⋮ → „Adaugă pe ecranul de pornire”.',
@@ -316,6 +316,7 @@ async function renderEnroll() {
           : ''}
         <div class="error" id="enroll-error">${esc(loginError)}</div>
       </div>
+      <p class="privacy-link"><a href="/privacy.html">${t('privacy')}</a></p>
     </section>`;
 
   $('#google-login')?.addEventListener('click', () => {
@@ -1093,7 +1094,8 @@ function openSettings() {
     <p><button class="btn btn-primary btn-block" id="save-goal">${t('save')}</button></p>
     <p><button class="btn btn-secondary btn-block" id="recalc">${t('recalc')}</button></p>
     <p class="hint">${t('installHint')}</p>
-    <p style="margin-top:32px"><button class="btn btn-danger btn-block" id="disconnect">${t('disconnect')}</button></p>`);
+    <p style="margin-top:32px"><button class="btn btn-danger btn-block" id="disconnect">${t('disconnect')}</button></p>
+    <p class="privacy-link"><a href="/privacy.html">${t('privacy')}</a></p>`);
   const body = $('.sheet-body', sheetRoot);
   body.onclick = async (e) => {
     const step = e.target.closest('[data-step]');

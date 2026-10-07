@@ -265,6 +265,16 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .avg { text-align: center; color: var(--muted); margin: 4px 0 16px; }
 .avg b { color: var(--text); }
 
+/* ---------- privacy page ---------- */
+.legal { padding-bottom: 48px; }
+.legal h1 { font-size: 26px; margin: 12px 0 4px; }
+.legal h2 { font-size: 19px; margin: 22px 0 6px; }
+.legal p, .legal li { line-height: 1.5; }
+.legal a { color: var(--accent); }
+.legal hr { border: 0; border-top: 1px solid var(--line); margin: 36px 0 12px; }
+.privacy-link { text-align: center; font-size: 14px; }
+.privacy-link a { color: var(--muted); }
+
 /* ---------- misc ---------- */
 .enroll { padding-top: 12vh; text-align: center; }
 .enroll .logo { width: 88px; height: 88px; border-radius: 22px; margin-bottom: 18px; }
