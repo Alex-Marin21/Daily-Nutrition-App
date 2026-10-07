@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createAuth, createLimiter } from './auth.js';
-import { analyzePhoto, analyzeText, AnalysisError, PROMPT_VERSION } from './analyze.js';
+import { analyzePhoto, analyzeText, AnalysisError, PROMPT_VERSION, AI_PROVIDER } from './analyze.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, '..', 'public');
@@ -17,8 +17,10 @@ if (process.env.VERCEL && !process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL must be set on Vercel (the filesystem there is read-only).');
 }
 
-if (process.env.MOCK_AI !== '1' && !process.env.ANTHROPIC_API_KEY) {
-  console.warn('WARNING: ANTHROPIC_API_KEY is not set. Photo analysis will fail (set MOCK_AI=1 to test the UI).');
+const AI_KEY = { gemini: 'GEMINI_API_KEY', claude: 'ANTHROPIC_API_KEY' }[AI_PROVIDER];
+console.log(`AI provider: ${AI_PROVIDER}`);
+if (AI_KEY && !process.env[AI_KEY]) {
+  console.warn(`WARNING: ${AI_KEY} is not set. Photo analysis will fail (set MOCK_AI=1 to test the UI).`);
 }
 
 const db = await openDb();

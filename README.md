@@ -10,7 +10,7 @@ Works on iPhone and Android as a web app you add to the Home Screen (no App Stor
 server/
   index.js    API + serves the app (no framework)
   auth.js     one-time access code → per-device token; rate limiting
-  analyze.js  Claude vision call (the only file that talks to the AI)
+  analyze.js  AI vision call: Gemini or Claude (the only file that talks to the AI)
   db.js       SQLite schema (built into Node, nothing to install)
 public/       the phone app (HTML/CSS/JS, installable PWA)
 scripts/      icon generator, device admin
@@ -19,7 +19,7 @@ scripts/      icon generator, device admin
 How a photo becomes a logged meal:
 
 1. The phone shrinks the photo (~1280 px JPEG) and sends it with the device token.
-2. The server checks the token and the daily limit, then asks Claude to identify each food, estimate grams, and give **per-100 g** nutrition values.
+2. The server checks the token and the daily limit, then asks the AI (Gemini by default, or Claude) to identify each food, estimate grams, and give **per-100 g** nutrition values.
 3. The phone multiplies grams × per-100 g values, so portion changes update instantly with no network call.
 4. "Log meal" sends the final items. The server recomputes all totals itself and stores both what the AI said (`ai_name`, `ai_grams`) and what was logged, so you can measure how accurate the AI is.
 
@@ -35,7 +35,8 @@ Copy `.env.example` to `.env` (one has already been created for local testing) a
 
 | Setting | What it is |
 |---|---|
-| `ANTHROPIC_API_KEY` | Your Claude API key from console.anthropic.com |
+| `GEMINI_API_KEY` | Your Gemini API key from aistudio.google.com/apikey |
+| `AI_PROVIDER` | `gemini` (default when a Gemini key is set) or `claude` (then set `ANTHROPIC_API_KEY`) |
 | `ENROLL_CODE` | The code your father types once on his phone. Long and random. |
 | `MOCK_AI` | `1` = fake results (UI testing), `0` = real AI |
 | `DAILY_ANALYSIS_LIMIT` | Max photo/text analyses per 24 h (cost safety) |
@@ -55,7 +56,7 @@ Free setup: **Vercel** (free hosting) + **Neon** (free Postgres database). No ca
 
 1. **Neon** (neon.tech): sign up → create a project → copy the **connection string** (`postgresql://...`).
 2. **Vercel** (vercel.com): sign in with GitHub → **Add New… → Project** → import this repository. Leave the build settings as they are (`vercel.json` configures them).
-3. Before clicking Deploy, open **Environment Variables** and add `DATABASE_URL` (the Neon string), `ANTHROPIC_API_KEY`, `ENROLL_CODE`, and `MOCK_AI` = `0`.
+3. Before clicking Deploy, open **Environment Variables** and add `DATABASE_URL` (the Neon string), `GEMINI_API_KEY`, `ENROLL_CODE`, `AI_PROVIDER` = `gemini`, and `MOCK_AI` = `0`.
 4. Click **Deploy**, then open the `https://….vercel.app` address on his phone, type the access code once, then:
    - **iPhone (Safari):** Share → *Add to Home Screen*
    - **Android (Chrome):** menu ⋮ → *Add to Home screen* / *Install app*
@@ -77,7 +78,7 @@ If he changes phones or clears the browser, revoke the old one and he enters the
 
 ## Cost
 
-Each photo is one Claude request (`claude-opus-5-5`, about 2–3k tokens in plus the response). Typing a food also counts as one request. `DAILY_ANALYSIS_LIMIT` caps daily usage. Also set a monthly spend limit in the Anthropic Console.
+Each photo or typed food is one AI request. With Gemini (`gemini-3.8-flash`) the API free tier covers normal use, but on the free tier Google may use the photos to improve its products; enabling billing on the key avoids that (about $0.002 per photo). Gemini sometimes answers "high demand"; the app retries automatically. `DAILY_ANALYSIS_LIMIT` caps daily usage.
 
 ## Checking AI accuracy
 

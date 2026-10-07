@@ -62,7 +62,13 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 
 /* ---------- header ---------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-.top-actions { display: flex; }
+.top-actions { display: flex; align-items: center; }
+.lang-btn {
+  height: 40px; min-width: 48px; padding: 0 10px; margin-right: 2px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); font-weight: 700; font-size: 15px; letter-spacing: 0.04em;
+}
+.lang-btn:active { background: var(--surface-2); }
+.enroll-lang { display: flex; justify-content: flex-end; }
 .datenav { display: flex; align-items: center; gap: 4px; }
 .datenav h1 { font-size: 24px; min-width: 7ch; text-align: center; }
 .icon-btn {

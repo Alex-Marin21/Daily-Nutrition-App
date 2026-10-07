@@ -4,8 +4,12 @@ import Anthropic from '@anthropic-ai/sdk';
 // providers, or A/B testing prompts, should only touch this file and config.
 
 export const PROMPT_VERSION = 'food-v1';
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
 const MOCK = process.env.MOCK_AI === '1';
+// AI_PROVIDER = 'gemini' | 'claude'. Unset: Gemini when its key is present, else Claude.
+const PROVIDER = process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'claude');
+const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+export const AI_PROVIDER = MOCK ? 'mock' : PROVIDER;
 
 const PER_100G = {
   kcal_100g: { type: 'number', description: 'kcal per 100 g for this preparation' },
@@ -80,9 +84,23 @@ export class AnalysisError extends Error {
   }
 }
 
-async function callClaude(lang, content) {
+function parseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new AnalysisError('bad_output', 'Model output was not valid JSON');
+  }
+}
+
+// ---------- Claude ----------
+
+async function callClaude(lang, { image, text }) {
+  const content = [];
+  if (image) content.push({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } });
+  content.push({ type: 'text', text });
+
   const response = await getClient().beta.messages.create({
-    model: MODEL,
+    model: CLAUDE_MODEL,
     max_tokens: 16000,
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
@@ -97,23 +115,96 @@ async function callClaude(lang, content) {
   if (response.stop_reason === 'refusal') throw new AnalysisError('refused');
   if (response.stop_reason === 'max_tokens') throw new AnalysisError('truncated');
 
-  const text = response.content
+  const out = response.content
     .filter((b) => b.type === 'text')
     .map((b) => b.text)
     .join('');
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new AnalysisError('bad_output', 'Model output was not valid JSON');
-  }
   return {
-    result: normalize(parsed),
+    result: normalize(parseJson(out)),
     model: response.model,
     inputTokens: response.usage?.input_tokens ?? null,
     outputTokens: response.usage?.output_tokens ?? null,
   };
 }
+
+// ---------- Gemini (REST generateContent) ----------
+
+// Gemini's docs show more than one spelling for JSON-schema output. Try the
+// documented ones in order and remember the first the API accepts.
+const GEMINI_JSON_CONFIGS = [
+  { responseMimeType: 'application/json', responseJsonSchema: RESULT_SCHEMA }, // verified working 2026-10
+  { responseFormat: { text: { mimeType: 'application/json', schema: RESULT_SCHEMA } } },
+  { responseMimeType: 'application/json' }, // schema then comes only from the prompt
+];
+let geminiConfigIndex = 0;
+
+async function callGemini(lang, { image, text }) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new AnalysisError('not_configured', 'GEMINI_API_KEY is not set');
+
+  const parts = [];
+  if (image) parts.push({ inlineData: { mimeType: image.mediaType, data: image.data } });
+  parts.push({ text });
+  // Spelled out for the fallback config, which can't enforce the schema itself.
+  const system = `${systemPrompt(lang)}\n\nReply with JSON only, matching this JSON Schema:\n${JSON.stringify(RESULT_SCHEMA)}`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
+  const deadline = Date.now() + 55_000; // stay under the hosting function's 60 s limit
+  // Gemini answers 500/503 ("high demand") now and then; retry those a few times.
+  async function post(generationConfig) {
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts }],
+          generationConfig,
+        }),
+        signal: AbortSignal.timeout(Math.max(deadline - Date.now(), 1_000)),
+      });
+      const data = await res.json().catch(() => ({}));
+      const delay = 1_500 * 2 ** attempt;
+      if ((res.status === 500 || res.status === 503) && attempt < 3 && Date.now() + delay + 10_000 < deadline) {
+        console.warn(`[gemini] ${res.status}, retrying in ${delay} ms`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      return { res, data };
+    }
+  }
+
+  for (let i = geminiConfigIndex; i < GEMINI_JSON_CONFIGS.length; i++) {
+    const { res, data } = await post(GEMINI_JSON_CONFIGS[i]);
+
+    if (res.status === 400 && i < GEMINI_JSON_CONFIGS.length - 1 && /generation_?config|response|schema|unknown name/i.test(data.error?.message || '')) {
+      console.warn(`[gemini] output config #${i} rejected (${data.error?.message}); trying the next one`);
+      continue;
+    }
+    if (res.status === 429 || res.status === 503) throw new AnalysisError('ai_busy', data.error?.message);
+    if (!res.ok) throw new AnalysisError('ai_unavailable', `Gemini ${res.status}: ${data.error?.message || ''}`);
+    geminiConfigIndex = i;
+
+    if (data.promptFeedback?.blockReason) throw new AnalysisError('refused', data.promptFeedback.blockReason);
+    const cand = data.candidates?.[0];
+    if (!cand) throw new AnalysisError('bad_output', 'Gemini returned no candidates');
+    if (cand.finishReason === 'SAFETY' || cand.finishReason === 'PROHIBITED_CONTENT') throw new AnalysisError('refused', cand.finishReason);
+    if (cand.finishReason === 'MAX_TOKENS') throw new AnalysisError('truncated');
+
+    const out = (cand.content?.parts || []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('');
+    // Tolerate a ```json fence when the schema wasn't enforced.
+    const json = out.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+    return {
+      result: normalize(parseJson(json)),
+      model: data.modelVersion || GEMINI_MODEL,
+      inputTokens: data.usageMetadata?.promptTokenCount ?? null,
+      outputTokens: data.usageMetadata?.candidatesTokenCount ?? null,
+    };
+  }
+  throw new AnalysisError('ai_unavailable', 'Gemini rejected every output config');
+}
+
+const callModel = (lang, input) => (PROVIDER === 'gemini' ? callGemini(lang, input) : callClaude(lang, input));
 
 const num = (v, max) => {
   const n = Number(v);
@@ -151,20 +242,17 @@ function normalize(r) {
 
 export async function analyzePhoto({ imageBase64, mediaType, lang }) {
   if (MOCK) return mockResult(lang);
-  return callClaude(lang, [
-    { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-    { type: 'text', text: 'Estimate the nutrition of this meal.' },
-  ]);
+  return callModel(lang, {
+    image: { mediaType, data: imageBase64 },
+    text: 'Estimate the nutrition of this meal.',
+  });
 }
 
 export async function analyzeText({ text, lang }) {
   if (MOCK) return mockResult(lang, text);
-  return callClaude(lang, [
-    {
-      type: 'text',
-      text: `The user typed what they ate instead of taking a photo. Estimate it. If no amount is given, assume one typical serving.\n\n<food_description>\n${text}\n</food_description>`,
-    },
-  ]);
+  return callModel(lang, {
+    text: `The user typed what they ate instead of taking a photo. Estimate it. If no amount is given, assume one typical serving.\n\n<food_description>\n${text}\n</food_description>`,
+  });
 }
 
 async function mockResult(lang, text) {

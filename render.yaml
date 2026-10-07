@@ -10,8 +10,10 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false        # paste the Neon connection string
-      - key: ANTHROPIC_API_KEY
-        sync: false        # paste your Claude API key
+      - key: GEMINI_API_KEY
+        sync: false        # paste your Gemini API key
+      - key: AI_PROVIDER
+        value: "gemini"
       - key: ENROLL_CODE
         sync: false        # the access code your father types once
       - key: MOCK_AI

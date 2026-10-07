@@ -6,8 +6,9 @@ const esc = (s) =>
 
 // ---------- i18n ----------
 
-const LANG = (navigator.language || 'en').toLowerCase().startsWith('ro') ? 'ro' : 'en';
-const LOCALE = LANG === 'ro' ? 'ro-RO' : 'en-US';
+// Romanian unless the user picked English with the language button.
+let LANG = 'ro';
+let LOCALE = 'ro-RO';
 const STR = {
   en: {
     today: 'Today', yesterday: 'Yesterday', kcal: 'kcal', ofGoal: 'of {goal}',
@@ -26,7 +27,7 @@ const STR = {
     deleteMeal: 'Delete this meal', confirmDelete: 'Delete this meal?', deleted: 'Meal deleted',
     discard: 'Discard this meal?', emptyItems: 'No foods yet. Add what you ate below.',
     history: 'Last 14 days', avg: 'Average: <b>{n}</b> kcal per day', noData: 'Nothing logged in the last 14 days.',
-    settings: 'Settings', goal: 'Daily calorie goal', save: 'Save', goalSaved: 'Goal saved ✓',
+    settings: 'Settings', language: 'Language', goal: 'Daily calorie goal', save: 'Save', goalSaved: 'Goal saved ✓',
     disconnect: 'Disconnect this phone', disconnectConfirm: 'Disconnect this phone? You will need the access code again.',
     installHint: 'Tip: add this app to your Home Screen for one-tap access. iPhone: Share → “Add to Home Screen”. Android: menu ⋮ → “Add to Home screen”.',
     enrollTitle: 'Daily Calories', enrollText: 'Enter the access code to start.', code: 'Access code', start: 'Start',
@@ -37,6 +38,7 @@ const STR = {
     err_daily_limit: 'Daily photo limit reached. You can still type what you ate.',
     err_ai_unavailable: 'The food recognition service is busy. Try again in a moment.',
     err_refused: 'This photo could not be analyzed. Try another photo.',
+    err_ai_busy: 'The food recognition service is very busy right now. Wait a minute and try again.',
     err_invalid_code: 'That code is not correct.', err_device_limit: 'The maximum number of phones is already connected.',
     err_too_many_attempts: 'Too many attempts. Wait 15 minutes.', err_server_not_configured: 'The server is not set up yet (missing access code).',
     err_generic: 'Something went wrong. Try again.',
@@ -45,8 +47,8 @@ const STR = {
     today: 'Azi', yesterday: 'Ieri', kcal: 'kcal', ofGoal: 'din {goal}',
     left: 'Mai ai <b>{n}</b> kcal', over: '<b>{n}</b> kcal peste țintă',
     protein: 'Proteine', carbs: 'Carbohidrați', fat: 'Grăsimi', meals: 'Mese',
-    noMeals: 'Nimic înregistrat încă', noMealsHint: 'Apasă „Fotografiază masa” și fă o poză farfuriei.',
-    snap: 'Fotografiază masa', typeIt: 'Scrie ce ai mâncat', gallery: 'Alege din poze',
+    noMeals: 'Nimic înregistrat încă', noMealsHint: 'Apasă „Fă o poză” și fotografiază farfuria.',
+    snap: 'Fă o poză', typeIt: 'Scrie ce ai mâncat', gallery: 'Alege din poze',
     breakfast: 'Mic dejun', lunch: 'Prânz', dinner: 'Cină', snack: 'Gustare',
     newMeal: 'Masă nouă', editMeal: 'Modifică masa',
     looking: 'Mă uit la farfurie…', lookingHint: 'Durează câteva secunde.',
@@ -58,7 +60,7 @@ const STR = {
     deleteMeal: 'Șterge masa', confirmDelete: 'Ștergi această masă?', deleted: 'Masă ștearsă',
     discard: 'Renunți la această masă?', emptyItems: 'Niciun aliment încă. Adaugă mai jos ce ai mâncat.',
     history: 'Ultimele 14 zile', avg: 'Media: <b>{n}</b> kcal pe zi', noData: 'Nimic înregistrat în ultimele 14 zile.',
-    settings: 'Setări', goal: 'Ținta zilnică de calorii', save: 'Salvează', goalSaved: 'Țintă salvată ✓',
+    settings: 'Setări', language: 'Limba', goal: 'Ținta zilnică de calorii', save: 'Salvează', goalSaved: 'Țintă salvată ✓',
     disconnect: 'Deconectează acest telefon', disconnectConfirm: 'Deconectezi telefonul? Vei avea nevoie din nou de cod.',
     installHint: 'Sfat: adaugă aplicația pe ecranul principal. iPhone: Partajare → „Adaugă pe ecranul principal”. Android: meniul ⋮ → „Adaugă pe ecranul de pornire”.',
     enrollTitle: 'Calorii zilnice', enrollText: 'Introdu codul de acces ca să începi.', code: 'Cod de acces', start: 'Începe',
@@ -69,6 +71,7 @@ const STR = {
     err_daily_limit: 'Ai atins limita de poze pe azi. Poți scrie ce ai mâncat.',
     err_ai_unavailable: 'Serviciul de recunoaștere e ocupat. Încearcă puțin mai târziu.',
     err_refused: 'Poza nu a putut fi analizată. Încearcă altă poză.',
+    err_ai_busy: 'Serviciul de recunoaștere e foarte ocupat acum. Așteaptă un minut și încearcă din nou.',
     err_invalid_code: 'Codul nu este corect.', err_device_limit: 'Numărul maxim de telefoane este deja conectat.',
     err_too_many_attempts: 'Prea multe încercări. Așteaptă 15 minute.', err_server_not_configured: 'Serverul nu este configurat (lipsește codul).',
     err_generic: 'Ceva n-a mers. Încearcă din nou.',
@@ -84,6 +87,26 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
   del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
 };
+
+function applyLang(lang) {
+  LANG = lang === 'en' ? 'en' : 'ro';
+  LOCALE = LANG === 'ro' ? 'ro-RO' : 'en-US';
+  document.documentElement.lang = LANG;
+}
+applyLang(store.get('lang'));
+
+// Switch language and redraw whatever screen is showing.
+function setLang(lang) {
+  applyLang(lang);
+  store.set('lang', LANG);
+  closeSheet();
+  if (token) renderDay();
+  else renderEnroll();
+}
+
+// Shows the language you can switch TO, written in that language.
+const langButton = () =>
+  `<button class="lang-btn" data-act="lang" aria-label="${LANG === 'ro' ? 'Switch to English' : 'Schimbă în română'}">${LANG === 'ro' ? 'EN' : 'RO'}</button>`;
 
 function uuid() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -189,6 +212,7 @@ const state = { date: dateStr(), day: null, me: null, loadError: false };
 
 function renderEnroll() {
   app.innerHTML = `
+    <div class="enroll-lang">${langButton()}</div>
     <section class="enroll">
       <img class="logo" src="/icons/icon-192.png" alt="">
       <h1>${t('enrollTitle')}</h1>
@@ -299,6 +323,7 @@ function renderDay() {
         <button class="icon-btn" data-act="next" aria-label="${t('nextDay')}" ${isToday ? 'disabled' : ''}>›</button>
       </div>
       <div class="top-actions">
+        ${langButton()}
         <button class="icon-btn" data-act="history" aria-label="${t('history')}">📅</button>
         <button class="icon-btn" data-act="settings" aria-label="${t('settings')}">⚙️</button>
       </div>
@@ -343,6 +368,8 @@ app.addEventListener('click', (e) => {
     if (meal) openReview(draftFromMeal(meal));
   } else if (act === 'history') {
     openHistory();
+  } else if (act === 'lang') {
+    setLang(LANG === 'ro' ? 'en' : 'ro');
   } else if (act === 'settings') {
     openSettings();
   }
@@ -785,6 +812,11 @@ async function openHistory() {
 function openSettings() {
   const goal = state.me?.goalKcal || 2000;
   openSimpleSheet(t('settings'), `
+    <span class="label">${t('language')}</span>
+    <div class="chips" role="group">
+      <button class="chip" data-lang="ro" aria-pressed="${LANG === 'ro'}">Română</button>
+      <button class="chip" data-lang="en" aria-pressed="${LANG === 'en'}">English</button>
+    </div>
     <label class="label" for="goal">${t('goal')}</label>
     <div class="stepper">
       <button data-step="-50" aria-label="−">−</button>
@@ -798,7 +830,11 @@ function openSettings() {
   body.onclick = async (e) => {
     const step = e.target.closest('[data-step]');
     const input = $('#goal', body);
-    if (step) {
+    const langChip = e.target.closest('[data-lang]');
+    if (langChip) {
+      setLang(langChip.dataset.lang);
+      openSettings();
+    } else if (step) {
       input.value = Math.min(6000, Math.max(800, Number(input.value) + Number(step.dataset.step)));
     } else if (e.target.id === 'save-goal') {
       try {
