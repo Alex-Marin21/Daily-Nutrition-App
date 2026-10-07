@@ -1,5 +1,7 @@
 # Daily Calories
 
+**Live:** https://daily-nutrition-app.vercel.app
+
 Take a photo of a meal → get calories, protein, carbs and fat → adjust if needed → log it → see the day's total.
 
 Works on iPhone and Android as a web app you add to the Home Screen (no App Store needed for the beta).
