@@ -4,16 +4,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { openDb } from './db.js';
+import { openDb, DATABASE_URL } from './db.js';
 import { createAuth, createLimiter } from './auth.js';
 import { analyzePhoto, analyzeText, AnalysisError, PROMPT_VERSION, AI_PROVIDER } from './analyze.js';
+import { computeTargets, normalizeProfile } from '../public/targets.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, '..', 'public');
 const DAILY_LIMIT = Number(process.env.DAILY_ANALYSIS_LIMIT || 40);
 const TRUST_PROXY = process.env.TRUST_PROXY === '1' || Boolean(process.env.VERCEL);
 
-if (process.env.VERCEL && !process.env.DATABASE_URL) {
+if (process.env.VERCEL && !DATABASE_URL) {
   throw new Error('DATABASE_URL must be set on Vercel (the filesystem there is read-only).');
 }
 
@@ -25,10 +26,22 @@ if (AI_KEY && !process.env[AI_KEY]) {
 
 const db = await openDb();
 console.log(`Storage: ${db.kind}`);
+// Supabase settings, also accepting the names Vercel's Supabase integration creates.
+const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY
+  || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
 const auth = createAuth(db, {
   enrollCode: process.env.ENROLL_CODE,
   maxDevices: Number(process.env.MAX_DEVICES || 2),
+  supabaseUrl: SUPABASE_URL,
+  supabaseKey: SUPABASE_KEY,
 });
+// What the login screen should offer.
+const PUBLIC_CONFIG = {
+  googleLogin: Boolean(SUPABASE_URL && SUPABASE_KEY),
+  supabaseUrl: SUPABASE_URL || null,
+  codeLogin: Boolean(process.env.ENROLL_CODE && process.env.ENROLL_CODE.length >= 8),
+};
 const enrollLimiter = createLimiter({ windowMs: 15 * 60_000, max: 5 });
 const burstLimiter = createLimiter({ windowMs: 60_000, max: 60 });
 
@@ -170,6 +183,16 @@ async function loadMeal(id, userId) {
 async function handleApi(req, res, url) {
   const route = `${req.method} ${url.pathname}`;
 
+  if (route === 'GET /api/v1/config') return send(res, 200, PUBLIC_CONFIG);
+
+  if (route === 'POST /api/v1/auth/supabase') {
+    if (!enrollLimiter(clientIp(req))) throw new HttpError(429, 'too_many_attempts');
+    const body = await readJson(req, 10_000);
+    const r = await auth.signInWithSupabase(body.accessToken, body.deviceName);
+    if (r.error) throw new HttpError(r.status, r.error);
+    return send(res, 201, { token: r.token });
+  }
+
   if (route === 'POST /api/v1/enroll') {
     if (!enrollLimiter(clientIp(req))) throw new HttpError(429, 'too_many_attempts');
     const body = await readJson(req, 4_000);
@@ -182,9 +205,44 @@ async function handleApi(req, res, url) {
   if (!user) throw new HttpError(401, 'unauthorized');
   if (!burstLimiter(`u${user.id}`)) throw new HttpError(429, 'slow_down');
 
+  if (route === 'POST /api/v1/logout') {
+    await auth.signOut(user.deviceId);
+    return send(res, 204);
+  }
+
   if (route === 'GET /api/v1/me') {
     const u = await db.get('SELECT id, display_name, goal_kcal FROM users WHERE id = ?', [user.id]);
-    return send(res, 200, { goalKcal: u.goal_kcal, name: u.display_name, dailyAnalysisLimit: DAILY_LIMIT });
+    const profile = await db.get(
+      `SELECT sex, age, height_cm, weight_kg, activity, goal, kcal, protein_g, carbs_g, fat_g FROM profiles WHERE user_id = ?`,
+      [user.id]
+    );
+    return send(res, 200, {
+      goalKcal: u.goal_kcal,
+      name: u.display_name,
+      dailyAnalysisLimit: DAILY_LIMIT,
+      profile: profile ?? null,
+    });
+  }
+
+  // Save body data; the server recomputes the targets and sets the daily goal from them.
+  if (route === 'PUT /api/v1/me/profile') {
+    const body = await readJson(req, 4_000);
+    const p = normalizeProfile(body);
+    if (!p) throw new HttpError(400, 'invalid_profile');
+    const tg = computeTargets(p);
+    const now = Date.now();
+    await db.tx(async (q) => {
+      await q.run(
+        `INSERT INTO profiles (user_id, sex, age, height_cm, weight_kg, activity, goal, kcal, protein_g, carbs_g, fat_g, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (user_id) DO UPDATE SET sex = excluded.sex, age = excluded.age, height_cm = excluded.height_cm,
+            weight_kg = excluded.weight_kg, activity = excluded.activity, goal = excluded.goal, kcal = excluded.kcal,
+            protein_g = excluded.protein_g, carbs_g = excluded.carbs_g, fat_g = excluded.fat_g, updated_at = excluded.updated_at`,
+        [user.id, p.sex, p.age, p.heightCm, p.weightKg, p.activity, p.goal, tg.kcal, tg.protein, tg.carbs, tg.fat, now]
+      );
+      await q.run('UPDATE users SET goal_kcal = ? WHERE id = ?', [tg.kcal, user.id]);
+    });
+    return send(res, 200, { goalKcal: tg.kcal, targets: tg });
   }
 
   if (route === 'PATCH /api/v1/me') {
@@ -329,6 +387,7 @@ async function handleApi(req, res, url) {
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',

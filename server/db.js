@@ -26,6 +26,32 @@ CREATE TABLE IF NOT EXISTS devices (
   revoked_at   BIGINT
 );
 
+-- Body data and the daily targets computed from it (public/targets.js).
+CREATE TABLE IF NOT EXISTS profiles (
+  user_id    BIGINT PRIMARY KEY REFERENCES users(id),
+  sex        TEXT NOT NULL,
+  age        INTEGER NOT NULL,
+  height_cm  DOUBLE PRECISION NOT NULL,
+  weight_kg  DOUBLE PRECISION NOT NULL,
+  activity   TEXT NOT NULL,
+  goal       TEXT NOT NULL,              -- 'lose' | 'maintain' | 'gain'
+  kcal       INTEGER NOT NULL,
+  protein_g  INTEGER NOT NULL,
+  carbs_g    INTEGER NOT NULL,
+  fat_g      INTEGER NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+
+-- External sign-in accounts (e.g. Google) linked to a user.
+CREATE TABLE IF NOT EXISTS identities (
+  provider   TEXT NOT NULL,              -- 'google'
+  subject    TEXT NOT NULL,              -- the provider's stable user id
+  user_id    BIGINT NOT NULL REFERENCES users(id),
+  email      TEXT,
+  created_at BIGINT NOT NULL,
+  PRIMARY KEY (provider, subject)
+);
+
 -- One row per AI call: raw output, model, prompt version, latency and tokens.
 -- This is the audit trail for accuracy and cost.
 CREATE TABLE IF NOT EXISTS analyses (
@@ -90,9 +116,14 @@ CREATE TABLE IF NOT EXISTS meal_items (
 CREATE INDEX IF NOT EXISTS idx_items_meal ON meal_items(meal_id);
 `;
 
+// DATABASE_URL, or POSTGRES_URL as created by Vercel's Supabase/Neon integrations.
+export const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+
 export async function openDb() {
-  return process.env.DATABASE_URL ? openPostgres(process.env.DATABASE_URL) : openSqlite(process.env.DB_PATH || 'data/nutrition.db');
+  return DATABASE_URL ? openPostgres(DATABASE_URL) : openSqlite(process.env.DB_PATH || 'data/nutrition.db');
 }
+
+const TABLES = ['users', 'devices', 'profiles', 'identities', 'analyses', 'meals', 'meal_items'];
 
 async function openPostgres(url) {
   const { default: pg } = await import('pg');
@@ -115,6 +146,10 @@ async function openPostgres(url) {
   });
 
   await pool.query(schema('BIGSERIAL PRIMARY KEY'));
+  // Supabase publishes tables to its public API; with row-level security on and
+  // no policies, that API can read nothing. Our server connects as the table
+  // owner, which RLS doesn't restrict.
+  await pool.query(TABLES.map((t) => `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`).join('\n'));
   return {
     kind: 'postgres',
     ...wrap(pool),

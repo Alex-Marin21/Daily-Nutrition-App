@@ -1,4 +1,5 @@
 // Daily Calories: snap a meal, review the estimate, log it, see the day.
+import { computeTargets, macroTargets, ACTIVITY_FACTORS } from './targets.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -27,8 +28,29 @@ const STR = {
     deleteMeal: 'Delete this meal', confirmDelete: 'Delete this meal?', deleted: 'Meal deleted',
     discard: 'Discard this meal?', emptyItems: 'No foods yet. Add what you ate below.',
     history: 'Last 14 days', avg: 'Average: <b>{n}</b> kcal per day', noData: 'Nothing logged in the last 14 days.',
+    ob_title: 'Your daily calories', ob_intro: 'A few quick questions so the app can estimate how much you should eat each day.',
+    ob_sex: 'You are', male: 'Man', female: 'Woman',
+    ob_body: 'About you', age: 'Age', years: 'years', height: 'Height', weight: 'Weight',
+    ob_activity: 'How active are you?',
+    act_sedentary: 'Mostly sitting', act_sedentary_d: 'Little walking during the day',
+    act_light: 'Lightly active', act_light_d: 'Daily walks or light exercise 1–3 days a week',
+    act_moderate: 'Moderately active', act_moderate_d: 'Exercise 3–5 days a week',
+    act_very: 'Very active', act_very_d: 'Hard exercise 6–7 days a week or physical work',
+    ob_goal: 'What is your goal?',
+    goal_lose: 'Lose weight', goal_lose_d: 'About 0.5 kg per week',
+    goal_maintain: 'Keep my weight', goal_maintain_d: 'Stay as I am',
+    goal_gain: 'Build muscle', goal_gain_d: 'A little more food, more protein',
+    ob_result: 'Your daily target', perDay: 'kcal per day',
+    ob_explain: 'At rest your body uses about {bmr} kcal a day. With your activity, about {tdee} kcal.',
+    ob_disclaimer: 'This is an estimate, not medical advice. If you have a health condition, ask your doctor.',
+    next: 'Next', back: 'Back', later: 'Later', saveTargets: 'Save my target',
+    recalc: 'Recalculate my daily needs', targetsSaved: 'Daily target saved ✓',
     settings: 'Settings', language: 'Language', goal: 'Daily calorie goal', save: 'Save', goalSaved: 'Goal saved ✓',
-    disconnect: 'Disconnect this phone', disconnectConfirm: 'Disconnect this phone? You will need the access code again.',
+    disconnect: 'Sign out', disconnectConfirm: 'Sign out of the app on this phone?',
+    signInText: 'Sign in to start. Your meals are saved to your account.', google: 'Continue with Google',
+    orCode: 'I have an access code',
+    err_invalid_login: 'Sign-in failed. Please try again.', err_auth_unavailable: 'The sign-in service is not responding. Try again in a moment.',
+    err_login_cancelled: 'Sign-in was cancelled.',
     installHint: 'Tip: add this app to your Home Screen for one-tap access. iPhone: Share → “Add to Home Screen”. Android: menu ⋮ → “Add to Home screen”.',
     enrollTitle: 'Daily Calories', enrollText: 'Enter the access code to start.', code: 'Access code', start: 'Start',
     offlineSaved: 'No connection. Saved on the phone — it will sync automatically.',
@@ -60,8 +82,29 @@ const STR = {
     deleteMeal: 'Șterge masa', confirmDelete: 'Ștergi această masă?', deleted: 'Masă ștearsă',
     discard: 'Renunți la această masă?', emptyItems: 'Niciun aliment încă. Adaugă mai jos ce ai mâncat.',
     history: 'Ultimele 14 zile', avg: 'Media: <b>{n}</b> kcal pe zi', noData: 'Nimic înregistrat în ultimele 14 zile.',
+    ob_title: 'Caloriile tale zilnice', ob_intro: 'Câteva întrebări rapide ca aplicația să estimeze cât ar trebui să mănânci pe zi.',
+    ob_sex: 'Ești', male: 'Bărbat', female: 'Femeie',
+    ob_body: 'Despre tine', age: 'Vârsta', years: 'ani', height: 'Înălțimea', weight: 'Greutatea',
+    ob_activity: 'Cât de activ ești?',
+    act_sedentary: 'Stau mai mult jos', act_sedentary_d: 'Merg puțin pe jos în timpul zilei',
+    act_light: 'Puțin activ', act_light_d: 'Plimbări zilnice sau sport ușor 1–3 zile pe săptămână',
+    act_moderate: 'Moderat activ', act_moderate_d: 'Sport 3–5 zile pe săptămână',
+    act_very: 'Foarte activ', act_very_d: 'Sport intens 6–7 zile pe săptămână sau muncă fizică',
+    ob_goal: 'Care este obiectivul tău?',
+    goal_lose: 'Să slăbesc', goal_lose_d: 'Cam 0,5 kg pe săptămână',
+    goal_maintain: 'Să-mi păstrez greutatea', goal_maintain_d: 'Să rămân cum sunt',
+    goal_gain: 'Să pun masă musculară', goal_gain_d: 'Puțin mai multă mâncare, mai multe proteine',
+    ob_result: 'Ținta ta zilnică', perDay: 'kcal pe zi',
+    ob_explain: 'În repaus corpul tău consumă cam {bmr} kcal pe zi. Cu activitatea ta, cam {tdee} kcal.',
+    ob_disclaimer: 'Este o estimare, nu un sfat medical. Dacă ai o problemă de sănătate, întreabă medicul.',
+    next: 'Înainte', back: 'Înapoi', later: 'Mai târziu', saveTargets: 'Salvează ținta',
+    recalc: 'Recalculează necesarul zilnic', targetsSaved: 'Țintă zilnică salvată ✓',
     settings: 'Setări', language: 'Limba', goal: 'Ținta zilnică de calorii', save: 'Salvează', goalSaved: 'Țintă salvată ✓',
-    disconnect: 'Deconectează acest telefon', disconnectConfirm: 'Deconectezi telefonul? Vei avea nevoie din nou de cod.',
+    disconnect: 'Ieși din cont', disconnectConfirm: 'Ieși din aplicație pe acest telefon?',
+    signInText: 'Conectează-te ca să începi. Mesele tale se salvează în contul tău.', google: 'Continuă cu Google',
+    orCode: 'Am un cod de acces',
+    err_invalid_login: 'Conectarea nu a reușit. Încearcă din nou.', err_auth_unavailable: 'Serviciul de conectare nu răspunde. Încearcă puțin mai târziu.',
+    err_login_cancelled: 'Conectarea a fost anulată.',
     installHint: 'Sfat: adaugă aplicația pe ecranul principal. iPhone: Partajare → „Adaugă pe ecranul principal”. Android: meniul ⋮ → „Adaugă pe ecranul de pornire”.',
     enrollTitle: 'Calorii zilnice', enrollText: 'Introdu codul de acces ca să începi.', code: 'Cod de acces', start: 'Începe',
     offlineSaved: 'Fără conexiune. Salvat pe telefon — se sincronizează automat.',
@@ -208,22 +251,80 @@ const app = $('#app');
 const sheetRoot = $('#sheet-root');
 const state = { date: dateStr(), day: null, me: null, loadError: false };
 
-// ---------- enrollment ----------
+// ---------- sign-in ----------
 
-function renderEnroll() {
+let config = null; // { googleLogin, supabaseUrl, codeLogin } from the server
+let loginError = '';
+
+const GOOGLE_G = `<svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/>
+  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+  <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>`;
+
+// Supabase sends the user back here with the session in the URL fragment
+// (#access_token=... or #error=...). Exchange it for our own app token.
+async function finishOAuthRedirect() {
+  if (!location.hash.includes('access_token=') && !location.hash.includes('error')) return;
+  const params = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', location.pathname + location.search); // never keep tokens in the URL
+  const accessToken = params.get('access_token');
+  if (!accessToken) {
+    if (params.get('error')) loginError = t('err_login_cancelled');
+    return;
+  }
+  try {
+    const res = await api('POST', '/auth/supabase', { accessToken, deviceName: navigator.userAgent.slice(0, 80) });
+    token = res.token;
+    store.set('token', token);
+  } catch (err) {
+    loginError = errText(err);
+  }
+}
+
+async function renderEnroll() {
+  if (!config) {
+    app.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+      config = await api('GET', '/config');
+    } catch (err) {
+      config = null;
+      app.innerHTML = `<section class="enroll"><p>${t('loadFailed')}</p>
+        <button class="btn btn-secondary" id="retry-config">${t('retry')}</button></section>`;
+      $('#retry-config').onclick = renderEnroll;
+      return;
+    }
+  }
+  const google = config.googleLogin
+    ? `<button class="btn btn-google btn-block" id="google-login">${GOOGLE_G}<span>${t('google')}</span></button>`
+    : '';
+  const codeForm = `
+    <form id="enroll-form" autocomplete="off">
+      <input class="field" name="code" placeholder="${t('code')}" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      <button class="btn btn-primary btn-block" type="submit">${t('start')}</button>
+    </form>`;
   app.innerHTML = `
     <div class="enroll-lang">${langButton()}</div>
     <section class="enroll">
       <img class="logo" src="/icons/icon-192.png" alt="">
       <h1>${t('enrollTitle')}</h1>
-      <p>${t('enrollText')}</p>
-      <form id="enroll-form" autocomplete="off">
-        <input class="field" name="code" placeholder="${t('code')}" autocapitalize="off" autocorrect="off" spellcheck="false" required>
-        <button class="btn btn-primary btn-block" type="submit">${t('start')}</button>
-        <div class="error" id="enroll-error"></div>
-      </form>
+      <p>${config.googleLogin ? t('signInText') : t('enrollText')}</p>
+      <div class="login-options">
+        ${google}
+        ${config.codeLogin
+          ? (config.googleLogin ? `<details class="code-login"><summary>${t('orCode')}</summary>${codeForm}</details>` : codeForm)
+          : ''}
+        <div class="error" id="enroll-error">${esc(loginError)}</div>
+      </div>
     </section>`;
-  $('#enroll-form').onsubmit = async (e) => {
+
+  $('#google-login')?.addEventListener('click', () => {
+    const back = `${location.origin}/`;
+    location.href = `${config.supabaseUrl}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(back)}`;
+  });
+  const form = $('#enroll-form');
+  if (!form) return;
+  form.onsubmit = async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button');
     btn.disabled = true;
@@ -236,6 +337,7 @@ function renderEnroll() {
       store.set('token', token);
       start();
     } catch (err) {
+      loginError = '';
       $('#enroll-error').textContent = errText(err);
       btn.disabled = false;
     }
@@ -261,6 +363,169 @@ async function loadDay() {
   }
   clearTimeout(slowTimer);
   renderDay();
+  // First visit (or skipped earlier on another day): ask for body data once.
+  if (state.me && !state.me.profile && !sheetRoot.innerHTML && store.get('ob_later') !== dateStr()) openOnboarding();
+}
+
+// ---------- onboarding: body data -> daily calorie target ----------
+
+let ob = null;
+
+function openOnboarding() {
+  const p = state.me?.profile;
+  draft = null;
+  ob = {
+    step: 0,
+    sex: p?.sex ?? null,
+    age: p?.age ?? 55,
+    heightCm: p?.height_cm ?? null,
+    weightKg: p?.weight_kg ?? null,
+    activity: p?.activity ?? null,
+    goal: p?.goal ?? null,
+    saving: false,
+  };
+  sheetRoot.innerHTML = `
+    <div class="sheet-backdrop">
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ob-title">
+        <div class="sheet-head"><h2 id="ob-title">${t('ob_title')}</h2>
+          <button class="btn btn-ghost" data-ob="later">${t('later')}</button></div>
+        <div class="sheet-body"></div>
+        <div class="sheet-foot ob-foot"></div>
+      </div>
+    </div>`;
+  const sheet = $('.sheet', sheetRoot);
+  sheet.addEventListener('click', onOnboardingClick);
+  sheet.addEventListener('change', (e) => {
+    const f = e.target.dataset.field;
+    if (!f || !ob) return;
+    const v = Number(String(e.target.value).replace(',', '.'));
+    if (Number.isFinite(v)) ob[f] = v;
+    renderOnboarding();
+  });
+  renderOnboarding();
+}
+
+const OB_STEPS = 5;
+// Body numbers are "ready" only when they are in a realistic range.
+const obReady = (s) =>
+  [
+    () => ob.sex,
+    () => computeTargets({ ...ob, activity: 'sedentary', goal: 'maintain' }) !== null,
+    () => ob.activity,
+    () => ob.goal,
+    () => true,
+  ][s]();
+
+function numField(field, label, unit, step) {
+  return `<div class="ob-num">
+    <span class="label">${label}</span>
+    <div class="stepper">
+      <button data-ob="dec" data-field="${field}" data-step="${step}" aria-label="−">−</button>
+      <label class="grams"><input data-field="${field}" type="number" inputmode="decimal" value="${ob[field] ?? ''}"><span>${unit}</span></label>
+      <button data-ob="inc" data-field="${field}" data-step="${step}" aria-label="+">+</button>
+    </div></div>`;
+}
+
+function options(field, keys, prefix, icons) {
+  return keys.map((k) => `
+    <button class="option" data-ob="pick" data-field="${field}" data-value="${k}" aria-pressed="${ob[field] === k}">
+      ${icons ? `<span class="option-icon">${icons[k]}</span>` : ''}
+      <span><b>${t(prefix + k)}</b>${STR.en[prefix + k + '_d'] ? `<small>${t(prefix + k + '_d')}</small>` : ''}</span>
+    </button>`).join('');
+}
+
+function renderOnboarding() {
+  if (!ob) return;
+  const body = $('.sheet-body', sheetRoot);
+  const dots = Array.from({ length: OB_STEPS }, (_, i) => `<i class="${i <= ob.step ? 'on' : ''}"></i>`).join('');
+  let html = `<div class="ob-dots" aria-hidden="true">${dots}</div>`;
+  if (ob.step === 0) {
+    html += `<p class="hint">${t('ob_intro')}</p><h3 class="ob-q">${t('ob_sex')}</h3>
+      ${options('sex', ['male', 'female'], '', { male: '👨', female: '👩' })}`;
+  } else if (ob.step === 1) {
+    html += `<h3 class="ob-q">${t('ob_body')}</h3>
+      ${numField('age', t('age'), t('years'), 1)}
+      ${numField('heightCm', t('height'), 'cm', 1)}
+      ${numField('weightKg', t('weight'), 'kg', 1)}`;
+  } else if (ob.step === 2) {
+    html += `<h3 class="ob-q">${t('ob_activity')}</h3>
+      ${options('activity', Object.keys(ACTIVITY_FACTORS), 'act_', { sedentary: '🪑', light: '🚶', moderate: '🚴', very: '🏋️' })}`;
+  } else if (ob.step === 3) {
+    html += `<h3 class="ob-q">${t('ob_goal')}</h3>
+      ${options('goal', ['lose', 'maintain', 'gain'], 'goal_', { lose: '⬇️', maintain: '⚖️', gain: '💪' })}`;
+  } else {
+    const tg = computeTargets(ob);
+    html += tg
+      ? `<h3 class="ob-q">${t('ob_result')}</h3>
+        <div class="ob-result"><strong>${fmt(tg.kcal)}</strong><span>${t('perDay')}</span></div>
+        <div class="totals">
+          <div><b>${tg.protein}</b><span>${t('protein')} g</span></div>
+          <div><b>${tg.carbs}</b><span>${t('carbs')} g</span></div>
+          <div><b>${tg.fat}</b><span>${t('fat')} g</span></div>
+        </div>
+        <p class="hint">${t('ob_explain', { bmr: fmt(tg.bmr), tdee: fmt(tg.tdee) })}</p>
+        <p class="hint">${t('ob_disclaimer')}</p>`
+      : `<p class="error">${t('err_generic')}</p>`;
+  }
+  body.innerHTML = html;
+
+  const last = ob.step === OB_STEPS - 1;
+  $('.ob-foot', sheetRoot).innerHTML = `
+    ${ob.step > 0 ? `<button class="btn btn-secondary" data-ob="back">${t('back')}</button>` : ''}
+    <button class="btn btn-primary" data-ob="${last ? 'save' : 'next'}" ${obReady(ob.step) && !ob.saving ? '' : 'disabled'}>
+      ${last ? t('saveTargets') : t('next')}</button>`;
+}
+
+async function onOnboardingClick(e) {
+  const el = e.target.closest('[data-ob]');
+  if (!el || !ob) return;
+  const act = el.dataset.ob;
+  const f = el.dataset.field;
+  if (act === 'later') {
+    store.set('ob_later', dateStr());
+    closeSheet();
+    return;
+  }
+  if (act === 'pick') {
+    ob[f] = el.dataset.value;
+    // Sensible starting values for the next screen, by sex.
+    if (f === 'sex') {
+      ob.heightCm ??= ob.sex === 'male' ? 175 : 162;
+      ob.weightKg ??= ob.sex === 'male' ? 80 : 68;
+    }
+    renderOnboarding();
+    setTimeout(() => { if (ob) { ob.step += 1; renderOnboarding(); } }, 180);
+    return;
+  }
+  if (act === 'inc' || act === 'dec') {
+    const d = Number(el.dataset.step) * (act === 'inc' ? 1 : -1);
+    ob[f] = Math.max(0, Math.round(((ob[f] || 0) + d) * 10) / 10);
+  } else if (act === 'back') {
+    ob.step = Math.max(0, ob.step - 1);
+  } else if (act === 'next') {
+    if (obReady(ob.step)) ob.step += 1;
+  } else if (act === 'save') {
+    ob.saving = true;
+    renderOnboarding();
+    try {
+      await api('PUT', '/me/profile', {
+        sex: ob.sex, age: ob.age, heightCm: ob.heightCm, weightKg: ob.weightKg, activity: ob.activity, goal: ob.goal,
+      });
+      state.me = await api('GET', '/me');
+      closeSheet();
+      toast(t('targetsSaved'));
+      renderDay();
+    } catch (err) {
+      if (err.code === 'unauthorized') return;
+      ob.saving = false;
+      toast(err.code === 'invalid_profile' ? t('err_generic') : errText(err));
+      // Out-of-range numbers: send the user back to the body-data screen.
+      if (err.code === 'invalid_profile') ob.step = 1;
+      renderOnboarding();
+    }
+    return;
+  }
+  renderOnboarding();
 }
 
 function ring(kcal, goal) {
@@ -280,7 +545,7 @@ function ring(kcal, goal) {
 
 function macroBar(cls, label, grams, target) {
   const pct = target > 0 ? Math.min((grams / target) * 100, 100) : 0;
-  return `<div class="macro"><div class="macro-row"><span>${label}</span><b>${fmt(grams)} g</b></div>
+  return `<div class="macro"><div class="macro-row"><span>${label}</span><span><b>${fmt(grams)}</b> / ${fmt(target)} g</span></div>
     <div class="bar ${cls}"><i style="width:${pct}%"></i></div></div>`;
 }
 
@@ -288,6 +553,7 @@ function renderDay() {
   const isToday = state.date === dateStr();
   const tot = state.day?.totals || { kcal: 0, protein: 0, carbs: 0, fat: 0 };
   const goal = state.me?.goalKcal || 2000;
+  const mt = macroTargets(goal, state.me?.profile);
   const diff = goal - tot.kcal;
   const meals = state.day?.meals || [];
 
@@ -332,9 +598,9 @@ function renderDay() {
       ${ring(tot.kcal, goal)}
       <div>
         <div class="remaining ${diff < 0 ? 'over-text' : ''}">${diff >= 0 ? t('left', { n: fmt(diff) }) : t('over', { n: fmt(-diff) })}</div>
-        ${macroBar('p', t('protein'), tot.protein, (goal * 0.2) / 4)}
-        ${macroBar('c', t('carbs'), tot.carbs, (goal * 0.5) / 4)}
-        ${macroBar('f', t('fat'), tot.fat, (goal * 0.3) / 9)}
+        ${macroBar('p', t('protein'), tot.protein, mt.protein)}
+        ${macroBar('c', t('carbs'), tot.carbs, mt.carbs)}
+        ${macroBar('f', t('fat'), tot.fat, mt.fat)}
       </div>
     </section>
     <h2 class="section-title">${t('meals')}</h2>
@@ -526,6 +792,7 @@ function openReview(d, { focusAdd = false } = {}) {
 function closeSheet() {
   if (draft?.photoUrl?.startsWith('blob:')) URL.revokeObjectURL(draft.photoUrl);
   draft = null;
+  ob = null;
   sheetRoot.innerHTML = '';
 }
 
@@ -824,6 +1091,7 @@ function openSettings() {
       <button data-step="50" aria-label="+">+</button>
     </div>
     <p><button class="btn btn-primary btn-block" id="save-goal">${t('save')}</button></p>
+    <p><button class="btn btn-secondary btn-block" id="recalc">${t('recalc')}</button></p>
     <p class="hint">${t('installHint')}</p>
     <p style="margin-top:32px"><button class="btn btn-danger btn-block" id="disconnect">${t('disconnect')}</button></p>`);
   const body = $('.sheet-body', sheetRoot);
@@ -836,6 +1104,8 @@ function openSettings() {
       openSettings();
     } else if (step) {
       input.value = Math.min(6000, Math.max(800, Number(input.value) + Number(step.dataset.step)));
+    } else if (e.target.id === 'recalc') {
+      openOnboarding();
     } else if (e.target.id === 'save-goal') {
       try {
         const goalKcal = Math.round(Number(input.value));
@@ -849,8 +1119,11 @@ function openSettings() {
       }
     } else if (e.target.id === 'disconnect') {
       if (!confirm(t('disconnectConfirm'))) return;
+      await api('POST', '/logout').catch(() => {}); // revoke this phone's token on the server
       token = null;
       store.del('token');
+      state.me = null;
+      state.day = null;
       closeSheet();
       renderEnroll();
     }
@@ -859,6 +1132,7 @@ function openSettings() {
 
 function openSimpleSheet(title, html) {
   draft = null;
+  ob = null;
   sheetRoot.innerHTML = `
     <div class="sheet-backdrop">
       <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
@@ -872,12 +1146,13 @@ function openSimpleSheet(title, html) {
 
 // Tapping the dimmed area closes simple sheets (not the review, to avoid losing a meal).
 sheetRoot.addEventListener('click', (e) => {
-  if (e.target.classList.contains('sheet-backdrop') && !draft) closeSheet();
+  if (e.target.classList.contains('sheet-backdrop') && !draft && !ob) closeSheet();
 });
 
 // ---------- start ----------
 
-function start() {
+async function start() {
+  await finishOAuthRedirect();
   if (!token) return renderEnroll();
   state.date = dateStr();
   state.day = null;
