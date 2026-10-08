@@ -1,5 +1,6 @@
 // Daily Calories: snap a meal, review the estimate, log it, see the day.
 import { computeTargets, macroTargets, ACTIVITY_FACTORS } from './targets.js';
+import { FOODS, POPULAR, searchFoods, fold } from './foods.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -49,6 +50,10 @@ const STR = {
     disconnect: 'Sign out', disconnectConfirm: 'Sign out of the app on this phone?',
     signInText: 'Sign in to start. Your meals are saved to your account.', google: 'Continue with Google',
     orCode: 'I have an access code', privacy: 'Privacy policy',
+    searchPlaceholder: 'What did you eat? e.g. “bread with salami”', calcAuto: 'Calculate automatically',
+    calcBtn: 'Calculate calories', calculating: 'Calculating…', calculatingHint: 'about 10 seconds',
+    recent: 'Eaten recently', popular: 'Common foods', fromList: 'Or pick from the list:', added: 'Added: {name}',
+    notFoodText: 'No food recognized. Try writing it differently.',
     err_invalid_login: 'Sign-in failed. Please try again.', err_auth_unavailable: 'The sign-in service is not responding. Try again in a moment.',
     err_login_cancelled: 'Sign-in was cancelled.',
     installHint: 'Tip: add this app to your Home Screen for one-tap access. iPhone: Share → “Add to Home Screen”. Android: menu ⋮ → “Add to Home screen”.',
@@ -61,6 +66,7 @@ const STR = {
     err_ai_unavailable: 'The food recognition service is busy. Try again in a moment.',
     err_refused: 'This photo could not be analyzed. Try another photo.',
     err_ai_busy: 'The food recognition service is very busy right now. Wait a minute and try again.',
+    err_ai_quota: 'Automatic calculation has reached its limit for today. Pick the foods from the list instead.',
     err_invalid_code: 'That code is not correct.', err_device_limit: 'The maximum number of phones is already connected.',
     err_too_many_attempts: 'Too many attempts. Wait 15 minutes.', err_server_not_configured: 'The server is not set up yet (missing access code).',
     err_generic: 'Something went wrong. Try again.',
@@ -103,6 +109,10 @@ const STR = {
     disconnect: 'Ieși din cont', disconnectConfirm: 'Ieși din aplicație pe acest telefon?',
     signInText: 'Conectează-te ca să începi. Mesele tale se salvează în contul tău.', google: 'Continuă cu Google',
     orCode: 'Am un cod de acces', privacy: 'Politica de confidențialitate',
+    searchPlaceholder: 'Ce ai mâncat? ex. „pâine cu salam”', calcAuto: 'Calculează automat',
+    calcBtn: 'Calculează caloriile', calculating: 'Se calculează…', calculatingHint: 'cam 10 secunde',
+    recent: 'Mâncate recent', popular: 'Alimente des folosite', fromList: 'Sau alege din listă:', added: 'Adăugat: {name}',
+    notFoodText: 'Nu am recunoscut alimentul. Încearcă să-l scrii altfel.',
     err_invalid_login: 'Conectarea nu a reușit. Încearcă din nou.', err_auth_unavailable: 'Serviciul de conectare nu răspunde. Încearcă puțin mai târziu.',
     err_login_cancelled: 'Conectarea a fost anulată.',
     installHint: 'Sfat: adaugă aplicația pe ecranul principal. iPhone: Partajare → „Adaugă pe ecranul principal”. Android: meniul ⋮ → „Adaugă pe ecranul de pornire”.',
@@ -115,6 +125,7 @@ const STR = {
     err_ai_unavailable: 'Serviciul de recunoaștere e ocupat. Încearcă puțin mai târziu.',
     err_refused: 'Poza nu a putut fi analizată. Încearcă altă poză.',
     err_ai_busy: 'Serviciul de recunoaștere e foarte ocupat acum. Așteaptă un minut și încearcă din nou.',
+    err_ai_quota: 'Calculul automat a atins limita pe azi. Alege alimentele din listă.',
     err_invalid_code: 'Codul nu este corect.', err_device_limit: 'Numărul maxim de telefoane este deja conectat.',
     err_too_many_attempts: 'Prea multe încercări. Așteaptă 15 minute.', err_server_not_configured: 'Serverul nu este configurat (lipsește codul).',
     err_generic: 'Ceva n-a mers. Încearcă din nou.',
@@ -698,7 +709,7 @@ function newDraft() {
     error: null,
     notes: '',
     addText: '',
-    adding: false,
+    pending: [], // free-text foods being calculated by the AI
     saving: false,
     idempotencyKey: uuid(),
   };
@@ -782,12 +793,151 @@ function openReview(d, { focusAdd = false } = {}) {
   const sheet = $('.sheet', sheetRoot);
   sheet.addEventListener('click', onReviewClick);
   sheet.addEventListener('change', onReviewChange);
-  sheet.addEventListener('input', (e) => { if (e.target.name === 'add') draft.addText = e.target.value; });
+  // Typing only refreshes the suggestions and the main button, so the field keeps focus.
+  sheet.addEventListener('input', (e) => {
+    if (e.target.name !== 'add') return;
+    draft.addText = e.target.value;
+    renderFoodResults();
+    renderReviewFoot();
+  });
   sheet.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.name === 'add') { e.preventDefault(); addTypedFood(); }
+    if (e.key === 'Enter' && e.target.name === 'add') { e.preventDefault(); calcTypedFood(); }
   });
   renderReview();
+  loadRecentFoods();
   if (focusAdd) setTimeout(() => $('input[name="add"]', sheetRoot)?.focus(), 250);
+}
+
+// ---------- food search: built-in list + recent foods + AI fallback ----------
+
+let recentFoods = [];
+async function loadRecentFoods() {
+  try {
+    recentFoods = (await api('GET', '/foods/recent')).foods || [];
+    if (draft) renderFoodResults();
+  } catch { /* suggestions still work from the built-in list */ }
+}
+
+const STOPWORDS = new Set(['de', 'cu', 'si', 'o', 'un', 'una', 'la', 'in', 'din', 'pe', 'and', 'with', 'of', 'the', 'felie', 'felii', 'bucata', 'bucati', 'slice', 'piece']);
+
+// Whole-phrase matches first; otherwise match the meaningful words one by one,
+// so "1 felie de paine cu salam" suggests both bread and salami.
+function listSuggestions(text) {
+  let res = searchFoods(text, 6);
+  if (!res.length) {
+    const seen = new Set();
+    for (const w of fold(text).split(/[^a-z0-9]+/)) {
+      if (w.length < 3 || STOPWORDS.has(w) || /^\d/.test(w)) continue;
+      for (const f of searchFoods(w, 3)) if (!seen.has(f.id)) { seen.add(f.id); res.push(f); }
+    }
+  }
+  return res.slice(0, 6);
+}
+
+function recentMatches(text) {
+  const words = fold(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+  if (!words.length) return [];
+  return recentFoods.filter((r) => words.some((w) => fold(r.name).includes(w))).slice(0, 3);
+}
+
+function foodRow(src, idx, name, portion, kcal) {
+  return `<button class="food-row" data-act="pick" data-src="${src}" data-idx="${idx}">
+    <span><b>${esc(name)}</b><small>${esc(portion)} · ${fmt(kcal)} kcal</small></span>
+    <span class="plus" aria-hidden="true">+</span></button>`;
+}
+
+function renderFoodResults() {
+  const box = $('#food-results', sheetRoot);
+  if (!box || !draft) return;
+  const text = draft.addText.trim();
+  const listRow = (f) => foodRow('list', f.id, LANG === 'ro' ? f.ro : f.en, LANG === 'ro' ? f.portionRo : f.portionEn,
+    (f.grams * f.kcal_100g) / 100);
+  const recentRow = (r) => foodRow('recent', recentFoods.indexOf(r), r.name, r.portion || `${Math.round(r.grams)} g`,
+    (r.grams * r.kcal_100g) / 100);
+  let html = '';
+  if (text) {
+    html += `<button class="food-row ai" data-act="calc">
+      <span class="ai-icon" aria-hidden="true">✨</span>
+      <span><b>${t('calcAuto')}</b><small>«${esc(text)}»</small></span></button>`;
+    const rec = recentMatches(text);
+    const list = listSuggestions(text).filter((f) => !rec.some((r) => fold(r.name) === fold(f.ro) || fold(r.name) === fold(f.en)));
+    if (rec.length || list.length) html += `<p class="food-head">${t('fromList')}</p>${rec.map(recentRow).join('')}${list.map(listRow).join('')}`;
+  } else {
+    const rec = recentFoods.slice(0, 5);
+    if (rec.length) html += `<p class="food-head">${t('recent')}</p>${rec.map(recentRow).join('')}`;
+    // Shorter list once the meal has foods, so it doesn't push them out of view.
+    const n = draft.items.length || draft.pending.length ? 5 : rec.length ? 6 : 10;
+    html += `<p class="food-head">${t('popular')}</p>${POPULAR.slice(0, n).map(listRow).join('')}`;
+  }
+  box.innerHTML = html;
+}
+
+// "2 oua" + tap "Ou fiert" -> two eggs.
+function typedQuantity(text) {
+  const m = /^\s*(\d+(?:[.,]\d+)?)\s/.exec(text);
+  const q = m ? Number(m[1].replace(',', '.')) : 1;
+  return q > 0 && q <= 20 ? q : 1;
+}
+
+function pickFood(src, idx) {
+  const d = draft;
+  let item;
+  if (src === 'recent') {
+    const r = recentFoods[idx];
+    if (!r) return;
+    item = { name: r.name, portion: r.portion, grams: r.grams, kcal_100g: r.kcal_100g, protein_100g: r.protein_100g, carbs_100g: r.carbs_100g, fat_100g: r.fat_100g };
+  } else {
+    const f = FOODS[idx];
+    if (!f) return;
+    const portion = LANG === 'ro' ? f.portionRo : f.portionEn;
+    // Only multiply single-unit portions ("1 ou", "1 felie"), never "2 ouă" or "1 porție".
+    const q = /^1 /.test(portion) && !/porți|serving/i.test(portion) ? typedQuantity(d.addText) : 1;
+    item = { name: LANG === 'ro' ? f.ro : f.en, portion: q === 1 ? portion : `${q} × ${portion}`, grams: Math.round(f.grams * q),
+      kcal_100g: f.kcal_100g, protein_100g: f.protein_100g, carbs_100g: f.carbs_100g, fat_100g: f.fat_100g };
+  }
+  d.items.push({ ...item, key: uuid(), baseGrams: item.grams, confidence: 'high', alternatives: [], showAlts: false, ai_name: null, ai_grams: null });
+  d.addText = '';
+  d.error = null;
+  toast(t('added', { name: item.name }));
+  renderReview();
+  showInSheet('.totals');
+}
+
+// Ask the AI about free text. Shows a visible "calculating" card, never blocks the screen.
+async function calcTypedFood(retryPending) {
+  const d = draft;
+  if (!d) return;
+  const p = retryPending || { id: uuid(), text: d.addText.trim() };
+  if (!p.text) return;
+  p.error = null;
+  if (!retryPending) {
+    d.pending.push(p);
+    d.addText = '';
+  }
+  renderReview();
+  showInSheet(`.item.pending[data-pid="${p.id}"]`);
+  try {
+    const res = await api('POST', '/analyses', { text: p.text, lang: LANG });
+    d.pending = d.pending.filter((x) => x !== p);
+    // Typed foods are user-provided, not photo recognition: don't count them as AI corrections.
+    d.items.push(...res.items.map((x) => ({ ...itemFromAi(x), ai_name: null, ai_grams: null })));
+    if (!res.items.length) {
+      d.pending.push({ ...p, error: t('notFoodText') });
+    } else d.error = null;
+  } catch (e) {
+    if (e.code === 'unauthorized') return;
+    p.error = errText(e);
+  }
+  if (draft === d) {
+    renderReview();
+    showInSheet('.totals');
+  }
+}
+
+// Scroll the sheet so the thing that just changed is in view.
+function showInSheet(selector) {
+  const el = $(selector, sheetRoot);
+  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 function closeSheet() {
@@ -802,6 +952,7 @@ function renderReview() {
   if (!d) return;
   const body = $('.sheet-body', sheetRoot);
   const scroll = body.scrollTop;
+  const typing = document.activeElement?.name === 'add';
   const tot = sumItems(d.items);
   $('#sheet-title').textContent = d.mealId ? t('editMeal') : t('newMeal');
 
@@ -846,19 +997,59 @@ function renderReview() {
         ${['breakfast', 'lunch', 'dinner', 'snack'].map((mt) =>
           `<button class="chip" data-act="type" data-type="${mt}" aria-pressed="${d.mealType === mt}">${t(mt)}</button>`).join('')}
       </div>
-      ${items || (d.error ? '' : `<p class="hint">${t('emptyItems')}</p>`)}
-      <div class="add-row">
-        <input class="field" name="add" placeholder="${esc(t('addPlaceholder'))}" value="${esc(d.addText)}" enterkeyhint="done" ${d.adding ? 'disabled' : ''}>
-        <button class="btn btn-secondary" data-act="add" ${d.adding ? 'disabled' : ''}>${d.adding ? t('adding') : t('add')}</button>
+      ${items}
+      ${d.pending.map(pendingCard).join('')}
+      <div class="food-search">
+        <input class="field" name="add" placeholder="${esc(t('searchPlaceholder'))}" value="${esc(d.addText)}"
+          enterkeyhint="go" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div id="food-results"></div>
       </div>
       ${d.mealId ? `<p style="margin-top:28px"><button class="btn btn-danger btn-block" data-act="delete">${t('deleteMeal')}</button></p>` : ''}`;
   }
   body.innerHTML = photo + (photo ? '<div style="height:12px"></div>' : '') + content;
   body.scrollTop = scroll;
+  renderFoodResults();
+  renderReviewFoot();
+  if (typing) {
+    const input = $('input[name="add"]', sheetRoot);
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  }
+}
 
+function pendingCard(p) {
+  if (p.error) {
+    return `<div class="item pending err">
+      <span class="pending-icon" aria-hidden="true">⚠️</span>
+      <span class="pending-text"><b>${esc(p.error)}</b><small>«${esc(p.text)}»</small></span>
+      <button class="btn btn-secondary btn-small" data-act="retry" data-pid="${p.id}">${t('retry')}</button>
+      <button class="icon-btn remove" data-act="dismiss" data-pid="${p.id}" aria-label="✕">✕</button>
+    </div>`;
+  }
+  return `<div class="item pending" data-pid="${p.id}">
+    <div class="spinner small" aria-hidden="true"></div>
+    <span class="pending-text"><b>${t('calculating')}</b><small>«${esc(p.text)}» · ${t('calculatingHint')}</small></span>
+  </div>`;
+}
+
+// The big button always does something useful: calculate typed text, or save the meal.
+function renderReviewFoot() {
+  const d = draft;
+  const foot = $('.sheet-foot', sheetRoot);
+  if (!d || !foot) return;
+  const busy = d.pending.some((p) => !p.error);
+  if (!d.loading && !d.items.length && d.addText.trim()) {
+    foot.innerHTML = `<button class="btn btn-primary btn-block" data-act="calc">✨ ${t('calcBtn')}</button>`;
+    return;
+  }
+  if (!d.items.length && busy) {
+    foot.innerHTML = `<button class="btn btn-primary btn-block" disabled>${t('calculating')}</button>`;
+    return;
+  }
+  const tot = sumItems(d.items);
   const label = d.mealId ? t('saveMeal', { n: fmt(tot.kcal) }) : t('logMeal', { n: fmt(tot.kcal) });
-  $('.sheet-foot', sheetRoot).innerHTML =
-    `<button class="btn btn-primary btn-block" data-act="log" ${d.loading || d.saving || !d.items.length ? 'disabled' : ''}>${label}</button>`;
+  foot.innerHTML =
+    `<button class="btn btn-primary btn-block" data-act="log" ${d.loading || d.saving || !d.items.length || busy ? 'disabled' : ''}>${label}</button>`;
 }
 
 function stepFor(it) {
@@ -903,9 +1094,20 @@ function onReviewClick(e) {
       });
       break;
     }
-    case 'add':
-      addTypedFood();
+    case 'calc':
+      calcTypedFood();
       return;
+    case 'pick':
+      pickFood(el.dataset.src, Number(el.dataset.idx));
+      return;
+    case 'retry': {
+      const p = d.pending.find((x) => x.id === el.dataset.pid);
+      if (p) calcTypedFood(p);
+      return;
+    }
+    case 'dismiss':
+      d.pending = d.pending.filter((x) => x.id !== el.dataset.pid);
+      break;
     case 'log':
       saveDraft();
       return;
@@ -924,29 +1126,6 @@ function onReviewChange(e) {
   const v = Number(e.target.value);
   if (it && Number.isFinite(v) && v > 0) it.grams = Math.min(5000, Math.round(v));
   renderReview();
-}
-
-async function addTypedFood() {
-  const d = draft;
-  const text = d.addText.trim();
-  if (!text || d.adding) return;
-  d.adding = true;
-  renderReview();
-  try {
-    const res = await api('POST', '/analyses', { text, lang: LANG });
-    // Typed foods are user-provided, not photo recognition: don't count them as AI corrections.
-    d.items.push(...res.items.map((x) => ({ ...itemFromAi(x), ai_name: null, ai_grams: null })));
-    d.addText = '';
-    if (res.items.length) d.error = null;
-  } catch (e) {
-    if (e.code === 'unauthorized') return;
-    toast(errText(e));
-  }
-  d.adding = false;
-  if (draft === d) {
-    renderReview();
-    $('.sheet-body', sheetRoot).scrollTop = 1e6;
-  }
 }
 
 function mealPayload(d) {

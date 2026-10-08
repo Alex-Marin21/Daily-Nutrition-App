@@ -8,7 +8,16 @@ const MOCK = process.env.MOCK_AI === '1';
 // AI_PROVIDER = 'gemini' | 'claude'. Unset: Gemini when its key is present, else Claude.
 const PROVIDER = process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'claude');
 const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+// Tried in order. Each Gemini model has its own free-tier daily quota (only
+// ~20 requests/day for the newest one), so when one is exhausted or overloaded
+// the next takes over.
+// GEMINI_MODELS replaces the list; GEMINI_MODEL only chooses which one goes first.
+const GEMINI_MODELS = [...new Set(
+  (process.env.GEMINI_MODELS || `${process.env.GEMINI_MODEL || ''},gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.5-flash`)
+    .split(',').map((m) => m.trim()).filter(Boolean)
+)];
+// model -> time (ms) until which we skip it after a quota error.
+const geminiSkipUntil = new Map();
 export const AI_PROVIDER = MOCK ? 'mock' : PROVIDER;
 
 const PER_100G = {
@@ -138,19 +147,44 @@ const GEMINI_JSON_CONFIGS = [
 ];
 let geminiConfigIndex = 0;
 
-async function callGemini(lang, { image, text }) {
+// "Please retry in 18h27m10s" -> milliseconds (capped), default 10 minutes.
+function retryDelayMs(message) {
+  const m = /retry in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:([\d.]+)s)?/i.exec(message || '');
+  if (!m) return 10 * 60_000;
+  const ms = ((Number(m[1]) || 0) * 3600 + (Number(m[2]) || 0) * 60 + (Number(m[3]) || 0)) * 1000;
+  return Math.min(Math.max(ms, 60_000), 24 * 3600_000);
+}
+
+async function callGemini(lang, input) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new AnalysisError('not_configured', 'GEMINI_API_KEY is not set');
+  const deadline = Date.now() + 55_000; // stay under the hosting function's 60 s limit
+  const now = Date.now();
+  const models = GEMINI_MODELS.filter((m) => (geminiSkipUntil.get(m) || 0) <= now);
+  let lastError = new AnalysisError('ai_quota', 'All Gemini models are over their quota');
+  for (const model of models) {
+    if (Date.now() > deadline - 8_000) break;
+    try {
+      return await callGeminiModel(model, lang, input, key, deadline);
+    } catch (err) {
+      if (err.code !== 'ai_quota' && err.code !== 'ai_busy') throw err;
+      lastError = err;
+      if (err.code === 'ai_quota') geminiSkipUntil.set(model, Date.now() + retryDelayMs(err.message));
+      console.warn(`[gemini] ${model}: ${err.code}; trying the next model`);
+    }
+  }
+  throw lastError;
+}
 
+async function callGeminiModel(model, lang, { image, text }, key, deadline) {
   const parts = [];
   if (image) parts.push({ inlineData: { mimeType: image.mediaType, data: image.data } });
   parts.push({ text });
   // Spelled out for the fallback config, which can't enforce the schema itself.
   const system = `${systemPrompt(lang)}\n\nReply with JSON only, matching this JSON Schema:\n${JSON.stringify(RESULT_SCHEMA)}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
-  const deadline = Date.now() + 55_000; // stay under the hosting function's 60 s limit
-  // Gemini answers 500/503 ("high demand") now and then; retry those a few times.
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  // Gemini answers 500/503 ("high demand") now and then; retry those briefly.
   async function post(generationConfig) {
     for (let attempt = 0; ; attempt++) {
       const res = await fetch(url, {
@@ -165,7 +199,7 @@ async function callGemini(lang, { image, text }) {
       });
       const data = await res.json().catch(() => ({}));
       const delay = 1_500 * 2 ** attempt;
-      if ((res.status === 500 || res.status === 503) && attempt < 3 && Date.now() + delay + 10_000 < deadline) {
+      if ((res.status === 500 || res.status === 503) && attempt < 1 && Date.now() + delay + 10_000 < deadline) {
         console.warn(`[gemini] ${res.status}, retrying in ${delay} ms`);
         await new Promise((r) => setTimeout(r, delay));
         continue;
@@ -181,7 +215,10 @@ async function callGemini(lang, { image, text }) {
       console.warn(`[gemini] output config #${i} rejected (${data.error?.message}); trying the next one`);
       continue;
     }
-    if (res.status === 429 || res.status === 503) throw new AnalysisError('ai_busy', data.error?.message);
+    if (res.status === 429) throw new AnalysisError('ai_quota', data.error?.message);
+    if (res.status === 503 || res.status === 500) throw new AnalysisError('ai_busy', data.error?.message);
+    // A model name Google has retired: move on to the next model.
+    if (res.status === 404) throw new AnalysisError('ai_quota', `Gemini model ${model} not found`);
     if (!res.ok) throw new AnalysisError('ai_unavailable', `Gemini ${res.status}: ${data.error?.message || ''}`);
     geminiConfigIndex = i;
 
@@ -196,7 +233,7 @@ async function callGemini(lang, { image, text }) {
     const json = out.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
     return {
       result: normalize(parseJson(json)),
-      model: data.modelVersion || GEMINI_MODEL,
+      model: data.modelVersion || model,
       inputTokens: data.usageMetadata?.promptTokenCount ?? null,
       outputTokens: data.usageMetadata?.candidatesTokenCount ?? null,
     };
@@ -220,6 +257,8 @@ function normalizePer100(src) {
   };
 }
 
+const capitalize = (s) => s.charAt(0).toLocaleUpperCase('ro') + s.slice(1);
+
 // Defensive pass: clamp numbers to physically possible ranges.
 function normalize(r) {
   const items = Array.isArray(r.items) ? r.items : [];
@@ -227,7 +266,7 @@ function normalize(r) {
     is_food: Boolean(r.is_food) && items.length > 0,
     notes: String(r.notes || '').slice(0, 300),
     items: items.slice(0, 20).map((it) => ({
-      name: String(it.name || '?').slice(0, 80),
+      name: capitalize(String(it.name || '?').trim().slice(0, 80)),
       portion: String(it.portion || '').slice(0, 60),
       grams: Math.round(num(it.grams, 3000)),
       confidence: ['high', 'medium', 'low'].includes(it.confidence) ? it.confidence : 'medium',

@@ -366,6 +366,25 @@ async function handleApi(req, res, url) {
     return send(res, 200, { date: dayMatch[1], totals: totals(meals), meals });
   }
 
+  // Foods this user logged before, most frequent first, for one-tap re-adding.
+  if (route === 'GET /api/v1/foods/recent') {
+    const rows = await db.all(
+      `SELECT i.name, i.portion, i.grams, i.kcal_100g, i.protein_100g, i.carbs_100g, i.fat_100g
+        FROM meal_items i JOIN meals m ON m.id = i.meal_id
+        WHERE i.user_id = ? ORDER BY m.eaten_at DESC LIMIT 400`,
+      [user.id]
+    );
+    const byName = new Map();
+    for (const r of rows) {
+      const key = r.name.trim().toLowerCase();
+      const hit = byName.get(key);
+      if (hit) hit.count += 1;
+      else byName.set(key, { ...r, count: 1 }); // newest entry wins for portion/grams
+    }
+    const foods = [...byName.values()].sort((a, b) => b.count - a.count).slice(0, 30);
+    return send(res, 200, { foods });
+  }
+
   if (route === 'GET /api/v1/summary') {
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
