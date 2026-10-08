@@ -261,6 +261,15 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 }
 .food-row.ai { border: 2px solid var(--accent); background: var(--accent-soft); }
 .food-row .ai-icon { font-size: 22px; flex: none; }
+.cat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cat-btn {
+  display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 10px 12px; text-align: left;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; font-weight: 600; font-size: 16px; line-height: 1.2;
+}
+.cat-btn span { font-size: 26px; flex: none; }
+.cat-btn:active { background: var(--accent-soft); }
+.cat-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0 2px; }
+.cat-bar .btn-ghost { padding: 0 6px; }
 .item.pending { display: flex; align-items: center; gap: 12px; border: 2px dashed var(--accent); }
 .item.pending.err { border-color: var(--warn); flex-wrap: wrap; }
 .item.pending.err .btn-small { order: 3; margin-left: 34px; }

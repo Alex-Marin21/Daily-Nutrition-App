@@ -1,6 +1,6 @@
 // Daily Calories: snap a meal, review the estimate, log it, see the day.
 import { computeTargets, macroTargets, ACTIVITY_FACTORS } from './targets.js';
-import { FOODS, POPULAR, searchFoods, fold } from './foods.js';
+import { FOODS, CATEGORIES, foodsInCategory, searchFoods, fold } from './foods.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -52,7 +52,7 @@ const STR = {
     orCode: 'I have an access code', privacy: 'Privacy policy',
     searchPlaceholder: 'What did you eat? e.g. “bread with salami”', calcAuto: 'Calculate automatically',
     calcBtn: 'Calculate calories', calculating: 'Calculating…', calculatingHint: 'about 10 seconds',
-    recent: 'Eaten recently', popular: 'Common foods', fromList: 'Or pick from the list:', added: 'Added: {name}',
+    recent: 'Eaten recently', categories: 'Or choose a category', allCategories: 'Categories', fromList: 'Or pick from the list:', added: 'Added: {name}',
     notFoodText: 'No food recognized. Try writing it differently.',
     err_invalid_login: 'Sign-in failed. Please try again.', err_auth_unavailable: 'The sign-in service is not responding. Try again in a moment.',
     err_login_cancelled: 'Sign-in was cancelled.',
@@ -111,7 +111,7 @@ const STR = {
     orCode: 'Am un cod de acces', privacy: 'Politica de confidențialitate',
     searchPlaceholder: 'Ce ai mâncat? ex. „pâine cu salam”', calcAuto: 'Calculează automat',
     calcBtn: 'Calculează caloriile', calculating: 'Se calculează…', calculatingHint: 'cam 10 secunde',
-    recent: 'Mâncate recent', popular: 'Alimente des folosite', fromList: 'Sau alege din listă:', added: 'Adăugat: {name}',
+    recent: 'Mâncate recent', categories: 'Sau alege o categorie', allCategories: 'Categorii', fromList: 'Sau alege din listă:', added: 'Adăugat: {name}',
     notFoodText: 'Nu am recunoscut alimentul. Încearcă să-l scrii altfel.',
     err_invalid_login: 'Conectarea nu a reușit. Încearcă din nou.', err_auth_unavailable: 'Serviciul de conectare nu răspunde. Încearcă puțin mai târziu.',
     err_login_cancelled: 'Conectarea a fost anulată.',
@@ -710,6 +710,7 @@ function newDraft() {
     notes: '',
     addText: '',
     pending: [], // free-text foods being calculated by the AI
+    category: null, // food category open in the browser, if any
     saving: false,
     idempotencyKey: uuid(),
   };
@@ -862,12 +863,19 @@ function renderFoodResults() {
     const rec = recentMatches(text);
     const list = listSuggestions(text).filter((f) => !rec.some((r) => fold(r.name) === fold(f.ro) || fold(r.name) === fold(f.en)));
     if (rec.length || list.length) html += `<p class="food-head">${t('fromList')}</p>${rec.map(recentRow).join('')}${list.map(listRow).join('')}`;
+  } else if (draft.category) {
+    // One category open: every food in it.
+    const cat = CATEGORIES.find((c) => c.key === draft.category);
+    html += `<div class="cat-bar">
+      <button class="btn btn-ghost" data-act="cat-back">‹ ${t('allCategories')}</button>
+      <b>${cat.icon} ${esc(cat[LANG])}</b></div>
+      ${foodsInCategory(cat.key).map(listRow).join('')}`;
   } else {
-    const rec = recentFoods.slice(0, 5);
+    // Nothing typed: recent foods, then the categories to browse.
+    const rec = recentFoods.slice(0, draft.items.length ? 3 : 5);
     if (rec.length) html += `<p class="food-head">${t('recent')}</p>${rec.map(recentRow).join('')}`;
-    // Shorter list once the meal has foods, so it doesn't push them out of view.
-    const n = draft.items.length || draft.pending.length ? 5 : rec.length ? 6 : 10;
-    html += `<p class="food-head">${t('popular')}</p>${POPULAR.slice(0, n).map(listRow).join('')}`;
+    html += `<p class="food-head">${t('categories')}</p><div class="cat-grid">${CATEGORIES.map((c) =>
+      `<button class="cat-btn" data-act="cat" data-cat="${c.key}"><span aria-hidden="true">${c.icon}</span>${esc(c[LANG])}</button>`).join('')}</div>`;
   }
   box.innerHTML = html;
 }
@@ -900,7 +908,8 @@ function pickFood(src, idx) {
   d.error = null;
   toast(t('added', { name: item.name }));
   renderReview();
-  showInSheet('.totals');
+  // Browsing a category: stay there to add more. Otherwise show what was added.
+  if (!d.category) showInSheet('.totals');
 }
 
 // Ask the AI about free text. Shows a visible "calculating" card, never blocks the screen.
@@ -1099,6 +1108,16 @@ function onReviewClick(e) {
       return;
     case 'pick':
       pickFood(el.dataset.src, Number(el.dataset.idx));
+      return;
+    case 'cat':
+      d.category = el.dataset.cat;
+      renderFoodResults();
+      showInSheet('.cat-bar');
+      return;
+    case 'cat-back':
+      d.category = null;
+      renderFoodResults();
+      showInSheet('.food-search');
       return;
     case 'retry': {
       const p = d.pending.find((x) => x.id === el.dataset.pid);

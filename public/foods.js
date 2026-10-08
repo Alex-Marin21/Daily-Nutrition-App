@@ -5,7 +5,7 @@
 // For drinks, 100 g ≈ 100 ml. Alcohol calories are included in kcal only.
 
 const RAW = [
-  // Eggs & dairy
+  '#dairy',
   ['Ou fiert', 'Boiled egg', 155, 12.6, 1.1, 10.6, 50, '1 ou', '1 egg'],
   ['Ou ochi (prăjit)', 'Fried egg', 196, 13.6, 0.8, 15.3, 46, '1 ou', '1 egg'],
   ['Omletă', 'Omelette', 154, 10.6, 0.6, 11.7, 120, '2 ouă', '2 eggs'],
@@ -19,7 +19,7 @@ const RAW = [
   ['Smântână', 'Sour cream', 204, 2.7, 3.5, 20, 15, '1 lingură', '1 tbsp'],
   ['Unt', 'Butter', 717, 0.9, 0.1, 81, 10, '1 linguriță', '1 tsp'],
 
-  // Bread, cereals, sides
+  '#bread',
   ['Pâine albă', 'White bread', 265, 9, 49, 3.2, 35, '1 felie', '1 slice'],
   ['Pâine integrală', 'Wholemeal bread', 247, 13, 41, 3.4, 35, '1 felie', '1 slice'],
   ['Covrig', 'Pretzel (covrig)', 300, 9, 58, 3, 80, '1 covrig', '1 pretzel'],
@@ -32,7 +32,7 @@ const RAW = [
   ['Fulgi de ovăz', 'Oats (dry)', 389, 16.9, 66, 6.9, 40, '4 linguri', '4 tbsp'],
   ['Clătită', 'Pancake (crêpe)', 227, 6.4, 28, 9.7, 60, '1 clătită', '1 crêpe'],
 
-  // Meat & fish
+  '#meat',
   ['Piept de pui la grătar', 'Grilled chicken breast', 165, 31, 0, 3.6, 150, '1 porție', '1 serving'],
   ['Pulpă de pui la cuptor', 'Roast chicken thigh', 229, 24, 0, 15, 150, '1 pulpă', '1 thigh'],
   ['Șnițel de pui', 'Breaded chicken schnitzel', 250, 20, 12, 13, 150, '1 bucată', '1 piece'],
@@ -47,7 +47,7 @@ const RAW = [
   ['Somon', 'Salmon', 206, 22, 0, 12.4, 150, '1 porție', '1 serving'],
   ['Ton în apă (conservă)', 'Tuna in water (can)', 116, 26, 0, 0.8, 120, '1 conservă', '1 can'],
 
-  // Romanian & common dishes
+  '#dishes',
   ['Ciorbă de perișoare', 'Meatball soup', 55, 3.5, 4, 2.8, 350, '1 bol', '1 bowl'],
   ['Ciorbă de burtă', 'Tripe soup', 80, 5, 3, 5, 350, '1 bol', '1 bowl'],
   ['Supă de pui cu tăiței', 'Chicken noodle soup', 40, 2.5, 4.5, 1.2, 350, '1 bol', '1 bowl'],
@@ -71,7 +71,7 @@ const RAW = [
   ['Shaorma', 'Shawarma wrap', 220, 10, 22, 10, 400, '1 porție', '1 wrap'],
   ['Sandviș cu șuncă și cașcaval', 'Ham & cheese sandwich', 260, 13, 28, 11, 150, '1 sandviș', '1 sandwich'],
 
-  // Vegetables
+  '#veg',
   ['Salată verde', 'Lettuce', 15, 1.4, 2.9, 0.2, 100, '1 bol', '1 bowl'],
   ['Roșii', 'Tomatoes', 18, 0.9, 3.9, 0.2, 120, '1 roșie', '1 tomato'],
   ['Castraveți', 'Cucumber', 15, 0.7, 3.6, 0.1, 150, '1 castravete', '1 cucumber'],
@@ -83,7 +83,7 @@ const RAW = [
   ['Murături', 'Pickles', 11, 0.3, 2.3, 0.2, 100, '1 porție', '1 serving'],
   ['Ceapă', 'Onion', 40, 1.1, 9.3, 0.1, 100, '1 ceapă', '1 onion'],
 
-  // Fruit
+  '#fruit',
   ['Măr', 'Apple', 52, 0.3, 13.8, 0.2, 180, '1 măr', '1 apple'],
   ['Banană', 'Banana', 89, 1.1, 22.8, 0.3, 120, '1 banană', '1 banana'],
   ['Portocală', 'Orange', 47, 0.9, 11.8, 0.1, 150, '1 portocală', '1 orange'],
@@ -95,7 +95,7 @@ const RAW = [
   ['Cireșe', 'Cherries', 63, 1.1, 16, 0.2, 150, '1 bol', '1 bowl'],
   ['Mandarine', 'Tangerines', 53, 0.8, 13.3, 0.3, 150, '2 mandarine', '2 tangerines'],
 
-  // Snacks & sweets
+  '#sweets',
   ['Ciocolată cu lapte', 'Milk chocolate', 535, 7.6, 59, 30, 25, '1 rând', '1 row'],
   ['Ciocolată neagră', 'Dark chocolate', 598, 7.8, 46, 43, 25, '1 rând', '1 row'],
   ['Biscuiți', 'Biscuits', 480, 7, 64, 21, 30, '4 biscuiți', '4 biscuits'],
@@ -109,7 +109,7 @@ const RAW = [
   ['Dulceață', 'Jam', 250, 0.4, 64, 0.1, 20, '1 lingură', '1 tbsp'],
   ['Zahăr', 'Sugar', 387, 0, 100, 0, 5, '1 linguriță', '1 tsp'],
 
-  // Drinks
+  '#drinks',
   ['Cafea neagră', 'Black coffee', 2, 0.1, 0, 0, 150, '1 ceașcă', '1 cup'],
   ['Cafea cu lapte', 'Coffee with milk', 50, 3, 4.6, 2.4, 250, '1 cană', '1 mug'],
   ['Ceai neîndulcit', 'Unsweetened tea', 1, 0, 0.2, 0, 250, '1 cană', '1 mug'],
@@ -120,7 +120,7 @@ const RAW = [
   ['Vin alb', 'White wine', 82, 0.1, 2.6, 0, 150, '1 pahar', '1 glass'],
   ['Țuică / pălincă', 'Plum brandy (țuică)', 231, 0, 0, 0, 50, '1 păhărel', '1 shot'],
 
-  // Fats & sauces
+  '#fats',
   ['Ulei (floarea-soarelui / măsline)', 'Oil (sunflower / olive)', 884, 0, 0, 100, 15, '1 lingură', '1 tbsp'],
   ['Maioneză', 'Mayonnaise', 680, 1, 0.6, 75, 15, '1 lingură', '1 tbsp'],
   ['Ketchup', 'Ketchup', 112, 1.2, 26, 0.1, 15, '1 lingură', '1 tbsp'],
@@ -137,10 +137,34 @@ const ALIASES = {
   'Ciocolată cu lapte': 'ciocolata', 'Ulei (floarea-soarelui / măsline)': 'ulei', 'Mici': 'mititei',
 };
 
-export const FOODS = RAW.map(([ro, en, kcal, protein, carbs, fat, grams, portionRo, portionEn], i) => ({
-  id: i, ro, en, kcal_100g: kcal, protein_100g: protein, carbs_100g: carbs, fat_100g: fat,
-  grams, portionRo, portionEn, aliases: ALIASES[ro] || '',
-}));
+// Categories for browsing, in display order. '#key' rows in RAW start a category.
+export const CATEGORIES = [
+  { key: 'dairy', icon: '🥚', ro: 'Ouă și lactate', en: 'Eggs & dairy' },
+  { key: 'bread', icon: '🍞', ro: 'Pâine și garnituri', en: 'Bread & sides' },
+  { key: 'meat', icon: '🍗', ro: 'Carne și pește', en: 'Meat & fish' },
+  { key: 'dishes', icon: '🍲', ro: 'Mâncăruri', en: 'Dishes' },
+  { key: 'veg', icon: '🥗', ro: 'Legume', en: 'Vegetables' },
+  { key: 'fruit', icon: '🍎', ro: 'Fructe', en: 'Fruit' },
+  { key: 'sweets', icon: '🍫', ro: 'Dulciuri și gustări', en: 'Sweets & snacks' },
+  { key: 'drinks', icon: '☕', ro: 'Băuturi', en: 'Drinks' },
+  { key: 'fats', icon: '🧈', ro: 'Grăsimi și sosuri', en: 'Fats & sauces' },
+];
+
+export const FOODS = [];
+let category = 'dairy';
+for (const row of RAW) {
+  if (typeof row === 'string') {
+    category = row.slice(1);
+    continue;
+  }
+  const [ro, en, kcal, protein, carbs, fat, grams, portionRo, portionEn] = row;
+  FOODS.push({
+    id: FOODS.length, ro, en, kcal_100g: kcal, protein_100g: protein, carbs_100g: carbs, fat_100g: fat,
+    grams, portionRo, portionEn, aliases: ALIASES[ro] || '', category,
+  });
+}
+
+export const foodsInCategory = (key) => FOODS.filter((f) => f.category === key);
 
 // Shown before the user types anything.
 export const POPULAR = [
