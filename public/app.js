@@ -1,6 +1,7 @@
 // Daily Calories: snap a meal, review the estimate, log it, see the day.
 import { computeTargets, macroTargets, ACTIVITY_FACTORS } from './targets.js';
 import { FOODS, CATEGORIES, foodsInCategory, searchFoods, fold } from './foods.js';
+import { parsePortion, unitLabel, unitCount, stepCount } from './units.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -716,8 +717,16 @@ function newDraft() {
   };
 }
 
+// Every food on the review card is counted in its household unit when its
+// portion has one ("2 ouă", "1 bol"); otherwise in grams.
+function withUnit(item) {
+  return { ...item, unit: parsePortion(item.portion, item.grams) };
+}
+
+const portionText = (it) => (it.unit ? unitLabel(it.unit, unitCount(it.unit, it.grams), LOCALE) : it.portion);
+
 function itemFromAi(it) {
-  return {
+  return withUnit({
     key: uuid(),
     name: it.name,
     portion: it.portion,
@@ -732,7 +741,7 @@ function itemFromAi(it) {
     showAlts: it.confidence === 'low' && (it.alternatives || []).length > 0,
     ai_name: it.name,
     ai_grams: it.grams,
-  };
+  });
 }
 
 function draftFromMeal(m) {
@@ -745,7 +754,7 @@ function draftFromMeal(m) {
     mealType: m.meal_type,
     thumbnail: m.thumbnail,
     photoUrl: m.thumbnail,
-    items: m.items.map((i) => ({
+    items: m.items.map((i) => withUnit({
       ...i,
       key: uuid(),
       baseGrams: i.grams,
@@ -880,11 +889,11 @@ function renderFoodResults() {
   box.innerHTML = html;
 }
 
-// "2 oua" + tap "Ou fiert" -> two eggs.
+// "2 oua" + tap "Ou fiert" -> two eggs. Null when no number was typed.
 function typedQuantity(text) {
   const m = /^\s*(\d+(?:[.,]\d+)?)\s/.exec(text);
-  const q = m ? Number(m[1].replace(',', '.')) : 1;
-  return q > 0 && q <= 20 ? q : 1;
+  const q = m ? Number(m[1].replace(',', '.')) : null;
+  return q > 0 && q <= 20 ? q : null;
 }
 
 function pickFood(src, idx) {
@@ -898,12 +907,14 @@ function pickFood(src, idx) {
     const f = FOODS[idx];
     if (!f) return;
     const portion = LANG === 'ro' ? f.portionRo : f.portionEn;
-    // Only multiply single-unit portions ("1 ou", "1 felie"), never "2 ouă" or "1 porție".
-    const q = /^1 /.test(portion) && !/porți|serving/i.test(portion) ? typedQuantity(d.addText) : 1;
-    item = { name: LANG === 'ro' ? f.ro : f.en, portion: q === 1 ? portion : `${q} × ${portion}`, grams: Math.round(f.grams * q),
+    item = { name: LANG === 'ro' ? f.ro : f.en, portion, grams: f.grams,
       kcal_100g: f.kcal_100g, protein_100g: f.protein_100g, carbs_100g: f.carbs_100g, fat_100g: f.fat_100g };
   }
-  d.items.push({ ...item, key: uuid(), baseGrams: item.grams, confidence: 'high', alternatives: [], showAlts: false, ai_name: null, ai_grams: null });
+  const added = withUnit({ ...item, key: uuid(), baseGrams: item.grams, confidence: 'high', alternatives: [], showAlts: false, ai_name: null, ai_grams: null });
+  // A typed number counts units: "2 oua" -> 2 ouă, "3 linguri smantana" -> 3 linguri.
+  const q = typedQuantity(d.addText);
+  if (q && added.unit) added.grams = Math.round(added.unit.unitGrams * q);
+  d.items.push(added);
   d.addText = '';
   d.error = null;
   toast(t('added', { name: item.name }));
@@ -980,13 +991,18 @@ function renderReview() {
       return `<div class="item">
         <div class="item-top">
           <button class="item-name" data-act="toggle-alts" data-i="${i}">${esc(it.name)}${badge}
-            <small>${esc(it.portion || '')}</small></button>
+            <small>${it.unit
+              ? `${fmt((it.unit.unitGrams * it.kcal_100g) / 100)} kcal / ${esc(it.unit.singular)}`
+              : esc(it.portion || '')}</small></button>
           <span class="item-kcal">${fmt(itemKcal(it))} kcal</span>
           <button class="icon-btn remove" data-act="remove" data-i="${i}" aria-label="✕">✕</button>
         </div>
         <div class="stepper">
           <button data-act="dec" data-i="${i}" aria-label="−">−</button>
-          <label class="grams"><input name="grams" data-i="${i}" type="number" inputmode="numeric" min="1" max="5000" value="${Math.round(it.grams)}"><span>g</span></label>
+          ${it.unit
+            ? `<div class="qty"><b>${esc(portionText(it))}</b>
+                <label class="qty-grams"><input name="grams" data-i="${i}" type="number" inputmode="numeric" min="1" max="5000" value="${Math.round(it.grams)}"><span>g</span></label></div>`
+            : `<label class="grams"><input name="grams" data-i="${i}" type="number" inputmode="numeric" min="1" max="5000" value="${Math.round(it.grams)}"><span>g</span></label>`}
           <button data-act="inc" data-i="${i}" aria-label="+">+</button>
         </div>
         ${alts}
@@ -1080,11 +1096,15 @@ function onReviewClick(e) {
       d.mealType = el.dataset.type;
       break;
     case 'inc':
-      it.grams = Math.min(5000, it.grams + stepFor(it));
+    case 'dec': {
+      const dir = el.dataset.act === 'inc' ? 1 : -1;
+      if (it.unit) {
+        it.grams = Math.round(stepCount(it.unit, unitCount(it.unit, it.grams), dir) * it.unit.unitGrams);
+      } else {
+        it.grams = Math.min(5000, Math.max(5, it.grams + dir * stepFor(it)));
+      }
       break;
-    case 'dec':
-      it.grams = Math.max(5, it.grams - stepFor(it));
-      break;
+    }
     case 'toggle-alts':
       it.showAlts = !it.showAlts;
       break;
@@ -1157,7 +1177,7 @@ function mealPayload(d) {
     thumbnail: d.thumbnail,
     idempotencyKey: d.idempotencyKey,
     items: d.items.map((it) => ({
-      name: it.name, portion: it.portion, grams: it.grams,
+      name: it.name, portion: portionText(it), grams: it.grams,
       kcal_100g: it.kcal_100g, protein_100g: it.protein_100g, carbs_100g: it.carbs_100g, fat_100g: it.fat_100g,
       ai_name: it.ai_name ?? null, ai_grams: it.ai_grams ?? null,
     })),

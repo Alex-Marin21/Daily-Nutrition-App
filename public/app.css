@@ -204,6 +204,14 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 }
 .grams input:focus { outline: none; border-color: var(--accent); }
 .grams span { color: var(--muted); }
+.qty { flex: 1; text-align: center; min-width: 0; }
+.qty b { display: block; font-size: 22px; line-height: 1.2; }
+.qty-grams { display: inline-flex; align-items: baseline; gap: 2px; color: var(--muted); font-size: 15px; }
+.qty-grams input {
+  width: 4.5ch; text-align: right; border: 0; border-bottom: 1px dashed var(--line); background: transparent;
+  color: var(--muted); font-size: 15px; padding: 0;
+}
+.qty-grams input:focus { outline: none; border-color: var(--accent); color: var(--text); }
 .alts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .alts p { width: 100%; margin: 0; font-size: 14px; color: var(--muted); }
 

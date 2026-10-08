@@ -1,7 +1,7 @@
 // App-shell cache so the app opens instantly and works with a weak signal.
 // API calls are never cached.
-const CACHE = 'shell-v5';
-const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/targets.js', '/foods.js', '/manifest.webmanifest', '/icons/icon-192.png'];
+const CACHE = 'shell-v6';
+const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/targets.js', '/foods.js', '/units.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
